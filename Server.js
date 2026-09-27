@@ -1,4 +1,3 @@
-
 // ==========================
 // LOAD ENVIRONMENT VARIABLES
 // ==========================
@@ -14,73 +13,39 @@ const cors = require("cors");
 const connectDB = require("./config/Db");
 const { errorHandler } = require("./middleware/ErrorMiddleware");
 
-// ==========================
-// ROUTES
-// ==========================
-const ProductRoutes = require("./routes/ProductRoutes");
 const userRoutes = require("./routes/UserRoute");
-const adminProductRoutes = require("./routes/AdminProductRoutes");
-const CategoryRoutes = require("./routes/CategoryRoutes");
 const adminUserRoutes = require("./routes/UserRoute");
-const NotificationRoutes = require("./routes/NotificationRoute");
-const OrderRoutes = require("./routes/OrderRoutes");
-const AdminOrderRoutes = require("./routes/AdminOrderRoutes");
-const PaymentRoutes = require("./routes/PaymentRoutes");
-const categoryPublicRoutes = require("./routes/categoryPublicRoutes");
-const bannerRoutes = require("./routes/BannerRoutes");
-const publicBannerRoutes = require("./routes/PublicBannerRoutes");
-const PurchaseRoutes = require("./routes/PurchaseRoutes");
-const adminReceivingRoutes = require("./routes/AdminReceivingRoutes");
-const discountRoutes = require("./routes/DiscountRoutes");
-const discountPublicRoutes = require("./routes/DiscountPublicRoutes");
-const MandateRoutes = require("./routes/MandateRoutes");
 
-// ==========================
-// CONTROLLERS
-// ==========================
-const { paystackWebhook } = require("./controllers/PaymentController");
+const NotificationRoutes = require("./routes/NotificationRoute");
+const KycRoutes = require("./routes/KycRoute");
+const LoanRoute = require("./routes/LoanRoute");
+const BankAccountRoutes = require("./routes/BankAccountRoute");
+const CreditRoutes = require("./routes/CreditRoute");
+const LoanOfferRoutes = require("./routes/LoanOfferRoute");
+const MandateRoutes = require("./routes/MandateRoute");
+const PaymentWebhookRoutes = require("./routes/PaymentWebhookRoute");
+const DisbursementRoutes = require("./routes/DisbursementRoute");
+const RepaymentRoutes = require("./routes/RepaymentRoute");
+const RepaymentWebhookRoutes = require("./routes/RepaymentWebhookRoute");
+const { startScheduler } = require("./jobs/scheduler");
+const VerificationRoutes = require("./routes/VerificationRoute");
+const LedgerRoutes = require("./routes/LedgerRoute");
+const adminLedgerRoutes = require("./routes/AdminLedgerRoute");
+const adminLoanRoutes = require("./routes/AdminLoanRoute");
+const adminLoanProductRoutes = require("./routes/AdminLoanProductRoute");
+const loanProductRoutes = require("./routes/LoanProductRoute");
+const adminBorrowerRoutes = require("./routes/AdminBorrowerRoute");
+const transferRoutes = require("./routes/transferRoutes");
+const fraudRoutes = require("./routes/FraudRoutes");
+const auditRoutes = require("./routes/AuditRoutes");
+const settingsRoutes = require("./routes/SettingsRoutes");
+const AdminDisbursementRoutes = require("./routes/AdminDisbursementRoutes");
+const autoDebitRoutes = require("./routes/AutoDebitRoutes");
 
 // ==========================
 // CREATE EXPRESS APP
 // ==========================
 const app = express();
-
-// ==========================
-// CORS CONFIGURATION
-// ==========================
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:3000",
-  "https://lovest-mmwz.onrender.com",
-];
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (
-      !origin ||
-      allowedOrigins.includes(origin) ||
-      origin.includes("onrender.com")
-    ) {
-      return callback(null, true);
-    }
-
-    return callback(new Error("Not allowed by CORS"));
-  },
-
-  credentials: true,
-
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "X-Requested-With",
-    "Origin",
-    "Accept",
-  ],
-
-  optionsSuccessStatus: 200,
-};
 
 // ==========================
 // START SERVER
@@ -91,56 +56,26 @@ const startServer = async () => {
     // CONNECT TO DATABASE
     // ==========================
     await connectDB();
+    startScheduler();
+
+    // ==========================
+    // CORS
+    // ==========================
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+
+    app.use(
+      cors({
+        origin: frontendUrl,
+        credentials: true,
+      }),
+    );
 
     // ==========================
     // MIDDLEWARE
     // ==========================
-
-    app.use(cors(corsOptions));
-
     app.use(cookieParser());
-
-    // ==========================
-    // REQUEST SIZE LIMIT
-    // ==========================
-    app.use((req, res, next) => {
-      const contentLength = req.headers["content-length"];
-
-      if (contentLength && Number(contentLength) > 300 * 1024 * 1024) {
-        return res.status(413).json({
-          success: false,
-          message: "File too large. Max 300MB allowed.",
-        });
-      }
-
-      next();
-    });
-
-    // ==========================
-    // PAYSTACK WEBHOOK
-    // ==========================
-    // Must come BEFORE express.json()
-    // because Paystack signature verification
-    // requires the original raw request body.
-
-    app.post(
-      "/api/payments/paystack/webhook",
-      express.raw({
-        type: "application/json",
-      }),
-      paystackWebhook,
-    );
-
-    // ==========================
-    // BODY PARSERS
-    // ==========================
     app.use(express.json());
-
-    app.use(
-      express.urlencoded({
-        extended: true,
-      }),
-    );
+    app.use(express.urlencoded({ extended: true }));
 
     // ==========================
     // HEALTH CHECK
@@ -160,59 +95,63 @@ const startServer = async () => {
     // USER ROUTES
     // ==========================
     app.use("/api/users", userRoutes);
+
+    app.use("/api/kyc", KycRoutes);
+
+    app.use("/api/loans", LoanRoute);
+
+    app.use("/api/bank-accounts", BankAccountRoutes);
+
+    app.use("/api/credit", CreditRoutes);
+
+    app.use("/api/loan-offers", LoanOfferRoutes);
+
+    console.log("LOAN OFFER ROUTES MOUNTED");
+
     app.use("/api/mandates", MandateRoutes);
+    app.use("/api/fraud", fraudRoutes);
 
     // ==========================
-    // PRODUCT ROUTES
+    // PAYMENT WEBHOOK ROUTES
     // ==========================
-    app.use("/api/products", ProductRoutes);
-    app.use("/api/admin/products", adminProductRoutes);
+    app.use("/api/webhooks", PaymentWebhookRoutes);
 
     // ==========================
-    // CATEGORY ROUTES
+    // DISBURSEMENT ROUTES
     // ==========================
-    app.use("/api/admin/categories", CategoryRoutes);
-    app.use("/api/categories", categoryPublicRoutes);
+    app.use("/api/disbursements", DisbursementRoutes);
+
+    // ==========================
+    // REPAYMENT ROUTES
+    // ==========================
+    app.use("/api/repayments", RepaymentRoutes);
+
+    // ==========================
+    // REPAYMENT WEBHOOK ROUTES
+    // ==========================
+    app.use("/api/webhooks", RepaymentWebhookRoutes);
+    app.use("/api/auto-debits", autoDebitRoutes);
+    app.use("/api/verifications", VerificationRoutes);
+    app.use("/api/ledger", LedgerRoutes);
+    app.use("/api/loan-products", loanProductRoutes);
+    app.use("/api/transfers", transferRoutes);
+    app.use("/api/audit", auditRoutes);
+    app.use("/api/settings", settingsRoutes);
 
     // ==========================
     // ADMIN USER ROUTES
     // ==========================
     app.use("/api/admin/users", adminUserRoutes);
-
-    // ==========================
-    // ORDER ROUTES
-    // ==========================
-    app.use("/api/orders", OrderRoutes);
-    app.use("/api/admin/orders", AdminOrderRoutes);
-
-    // ==========================
-    // PURCHASE ROUTES
-    // ==========================
-    app.use("/api/admin/purchase-orders", adminReceivingRoutes);
-    app.use("/api/purchase", PurchaseRoutes);
-    app.use("/api/purchases", PurchaseRoutes);
-
-    // ==========================
-    // DISCOUNT ROUTES
-    // ==========================
-    app.use("/api/discounts", discountPublicRoutes);
-    app.use("/api/admin/discounts", discountRoutes);
+    app.use("/api/admin/loans", adminLoanRoutes);
+    app.use("/api/admin/ledger", adminLedgerRoutes);
+    app.use("/api/admin/loan-products", adminLoanProductRoutes);
+    app.use("/api/admin/borrowers", adminBorrowerRoutes);
+    app.use("/api/admin/disbursements", AdminDisbursementRoutes);
 
     // ==========================
     // NOTIFICATION ROUTES
     // ==========================
     app.use("/api/notifications", NotificationRoutes);
-
-    // ==========================
-    // PAYMENT ROUTES
-    // ==========================
-    app.use("/api/payments", PaymentRoutes);
-
-    // ==========================
-    // BANNER ROUTES
-    // ==========================
-    app.use("/api/admin/banners", bannerRoutes);
-    app.use("/api/banners", publicBannerRoutes);
 
     // ==========================
     // ERROR HANDLER
@@ -225,12 +164,8 @@ const startServer = async () => {
     const PORT = process.env.PORT || 5000;
 
     app.listen(PORT, () => {
-      console.log("=================================");
-      console.log("🚀 Server started successfully");
-      console.log(`📡 Port: ${PORT}`);
-      console.log("💳 Paystack webhook:");
-      console.log("   POST /api/payments/paystack/webhook");
-      console.log("=================================");
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🌐 Frontend allowed: ${frontendUrl}`);
     });
   } catch (error) {
     console.error("❌ Failed to start server");
