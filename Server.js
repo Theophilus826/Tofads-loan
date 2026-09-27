@@ -41,6 +41,7 @@ const auditRoutes = require("./routes/AuditRoutes");
 const settingsRoutes = require("./routes/SettingsRoutes");
 const AdminDisbursementRoutes = require("./routes/AdminDisbursementRoutes");
 const autoDebitRoutes = require("./routes/AutoDebitRoutes");
+const OnboardingRoutes = require("./routes/onboarding");
 
 // ==========================
 // CREATE EXPRESS APP
@@ -97,7 +98,7 @@ const startServer = async () => {
     app.use("/api/users", userRoutes);
 
     app.use("/api/kyc", KycRoutes);
-
+    app.use("/api/onboarding", OnboardingRoutes);
     app.use("/api/loans", LoanRoute);
 
     app.use("/api/bank-accounts", BankAccountRoutes);
