@@ -1,7 +1,7 @@
 {
   "name": "loan-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Tofad-Loan",
   "main": "server.js",
   "engines": {
     "node": "20.x"
