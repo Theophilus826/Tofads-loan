@@ -101,7 +101,7 @@ const startServer = async () => {
     app.use("/api/onboarding", OnboardingRoutes);
     app.use("/api/loans", LoanRoute);
 
-    app.use("/api/bank-accounts", BankAccountRoutes);
+    app.use("/api/banks", BankAccountRoutes);
 
     app.use("/api/credit", CreditRoutes);
 

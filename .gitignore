@@ -19,7 +19,7 @@ backend/node_modules/
 .env.development.local
 .env.test.local
 .env.production.local
-
+.menumoney-60681-firebase-adminsdk-fbsvc-ac3790c9e5.json
 frontend/.env
 frontend/.env.local
 backend/.env

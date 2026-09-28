@@ -116,10 +116,7 @@ const createOffer = async (req, res, next) => {
 
     const requestedAmount = Number(application.amountRequested);
 
-    if (
-      !Number.isFinite(requestedAmount) ||
-      requestedAmount <= 0
-    ) {
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
       return res.status(400).json({
         success: false,
         message: "Application does not contain a valid requested amount",
@@ -158,9 +155,7 @@ const createOffer = async (req, res, next) => {
     // ---------------------------------------------------------
 
     const totalInterest =
-      approvedAmount *
-      (interestRate / 100) *
-      (durationDays / 30);
+      approvedAmount * (interestRate / 100) * (durationDays / 30);
 
     // ---------------------------------------------------------
     // PROCESSING FEE
@@ -168,8 +163,7 @@ const createOffer = async (req, res, next) => {
 
     const processingFee =
       product.processingFeeType === "percentage"
-        ? approvedAmount *
-          ((Number(product.processingFee) || 0) / 100)
+        ? approvedAmount * ((Number(product.processingFee) || 0) / 100)
         : Number(product.processingFee) || 0;
 
     // ---------------------------------------------------------
@@ -184,10 +178,7 @@ const createOffer = async (req, res, next) => {
 
     const totalFees = processingFee + serviceFee;
 
-    const totalRepayment =
-      approvedAmount +
-      totalInterest +
-      totalFees;
+    const totalRepayment = approvedAmount + totalInterest + totalFees;
 
     // ---------------------------------------------------------
     // INSTALLMENTS
@@ -214,13 +205,9 @@ const createOffer = async (req, res, next) => {
         break;
     }
 
-    numberOfInstallments = Math.max(
-      numberOfInstallments,
-      1,
-    );
+    numberOfInstallments = Math.max(numberOfInstallments, 1);
 
-    const installmentAmount =
-      totalRepayment / numberOfInstallments;
+    const installmentAmount = totalRepayment / numberOfInstallments;
 
     // ---------------------------------------------------------
     // EXPIRY
@@ -228,9 +215,7 @@ const createOffer = async (req, res, next) => {
 
     const expiresAt = new Date();
 
-    expiresAt.setDate(
-      expiresAt.getDate() + 7,
-    );
+    expiresAt.setDate(expiresAt.getDate() + 7);
 
     // ---------------------------------------------------------
     // CREATE OFFER DATA
@@ -261,8 +246,7 @@ const createOffer = async (req, res, next) => {
 
       durationDays,
 
-      repaymentFrequency:
-        product.repaymentFrequency,
+      repaymentFrequency: product.repaymentFrequency,
 
       installmentAmount,
 
@@ -275,28 +259,26 @@ const createOffer = async (req, res, next) => {
       createdBy: adminId,
     };
 
-    /*
-     * Credit assessment is OPTIONAL.
-     *
-     * Only attach it when the application actually
-     * has one. Do not send `undefined` unnecessarily.
-     */
-    if (application.creditAssessment) {
-      offerData.creditAssessment =
-        application.creditAssessment;
+    // ---------------------------------------------------------
+    // CREDIT ASSESSMENT
+    // ---------------------------------------------------------
+
+    if (!application.creditAssessment) {
+      return res.status(400).json({
+        success: false,
+        message: "Credit assessment is required before creating a loan offer",
+      });
     }
 
-    console.log(
-      "CREATE OFFER: Creating offer:",
-      offerData,
-    );
+    offerData.creditAssessment = application.creditAssessment;
+
+    console.log("CREATE OFFER: Creating offer:", offerData);
 
     // ---------------------------------------------------------
     // CREATE
     // ---------------------------------------------------------
 
-    const offer =
-      await LoanOffer.create(offerData);
+    const offer = await LoanOffer.create(offerData);
 
     // ---------------------------------------------------------
     // UPDATE APPLICATION
@@ -310,15 +292,11 @@ const createOffer = async (req, res, next) => {
     // POPULATE OFFER
     // ---------------------------------------------------------
 
-    const populatedOffer =
-      await LoanOffer.findById(offer._id)
-        .populate(
-          "user",
-          "name email phone avatar",
-        )
-        .populate(
-          "loanProduct",
-          `
+    const populatedOffer = await LoanOffer.findById(offer._id)
+      .populate("user", "name email phone avatar")
+      .populate(
+        "loanProduct",
+        `
             name
             title
             code
@@ -334,9 +312,9 @@ const createOffer = async (req, res, next) => {
             serviceFee
             repaymentFrequency
           `,
-        )
-        .populate("loanApplication")
-        .populate("creditAssessment");
+      )
+      .populate("loanApplication")
+      .populate("creditAssessment");
 
     return res.status(201).json({
       success: true,
@@ -344,20 +322,15 @@ const createOffer = async (req, res, next) => {
       data: populatedOffer,
     });
   } catch (error) {
-    console.error(
-      "CREATE LOAN OFFER ERROR:",
-      error,
-    );
+    console.error("CREATE LOAN OFFER ERROR:", error);
 
     if (error.name === "ValidationError") {
       const errors = {};
 
-      for (const [
-        field,
-        validationError,
-      ] of Object.entries(error.errors || {})) {
-        errors[field] =
-          validationError.message;
+      for (const [field, validationError] of Object.entries(
+        error.errors || {},
+      )) {
+        errors[field] = validationError.message;
       }
 
       return res.status(400).json({
@@ -377,8 +350,7 @@ const createOffer = async (req, res, next) => {
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message:
-          "A loan offer already exists for this application",
+        message: "A loan offer already exists for this application",
       });
     }
 
@@ -504,10 +476,7 @@ const acceptOffer = async (req, res, next) => {
     // ACCEPT OFFER
     // -----------------------------------------------------
 
-    const offer = await LoanOfferService.acceptOffer(
-      userId,
-      id
-    );
+    const offer = await LoanOfferService.acceptOffer(userId, id);
 
     // -----------------------------------------------------
     // RESPONSE
@@ -519,10 +488,7 @@ const acceptOffer = async (req, res, next) => {
       data: offer,
     });
   } catch (error) {
-    console.error(
-      "ACCEPT LOAN OFFER ERROR:",
-      error
-    );
+    console.error("ACCEPT LOAN OFFER ERROR:", error);
 
     next(error);
   }
