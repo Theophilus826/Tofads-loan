@@ -10,17 +10,13 @@ const findByEventId = async (
   provider,
   eventId
 ) => {
-
-  if (
-    !provider ||
-    !eventId
-  ) {
+  if (!provider || !eventId) {
     return null;
   }
 
   return WebhookEvent.findOne({
-    provider: String(provider).toLowerCase(),
-    eventId: String(eventId),
+    provider: String(provider).trim().toLowerCase(),
+    eventId: String(eventId).trim(),
   });
 };
 
@@ -31,16 +27,15 @@ const findByEventId = async (
 const create = async (
   data
 ) => {
-
   return WebhookEvent.create({
     ...data,
 
     provider: data.provider
-      ? String(data.provider).toLowerCase()
+      ? String(data.provider).trim().toLowerCase()
       : data.provider,
 
     eventId: data.eventId
-      ? String(data.eventId)
+      ? String(data.eventId).trim()
       : data.eventId,
   });
 };
@@ -50,11 +45,18 @@ const create = async (
 // =========================================================
 
 const markProcessing = async (
-  id
+  provider,
+  eventId
 ) => {
+  if (!provider || !eventId) {
+    return null;
+  }
 
-  return WebhookEvent.findByIdAndUpdate(
-    id,
+  return WebhookEvent.findOneAndUpdate(
+    {
+      provider: String(provider).trim().toLowerCase(),
+      eventId: String(eventId).trim(),
+    },
     {
       $set: {
         status: "processing",
@@ -62,7 +64,7 @@ const markProcessing = async (
       },
     },
     {
-      returnDocument: "after",
+      new: true,
       runValidators: true,
     }
   );
@@ -73,20 +75,32 @@ const markProcessing = async (
 // =========================================================
 
 const markProcessed = async (
-  id
+  provider,
+  eventId,
+  update = {}
 ) => {
+  if (!provider || !eventId) {
+    return null;
+  }
 
-  return WebhookEvent.findByIdAndUpdate(
-    id,
+  return WebhookEvent.findOneAndUpdate(
+    {
+      provider: String(provider).trim().toLowerCase(),
+      eventId: String(eventId).trim(),
+    },
     {
       $set: {
         status: "processed",
         processedAt: new Date(),
         errorMessage: null,
+
+        ...(update.result !== undefined
+          ? { result: update.result }
+          : {}),
       },
     },
     {
-      returnDocument: "after",
+      new: true,
       runValidators: true,
     }
   );
@@ -97,22 +111,30 @@ const markProcessed = async (
 // =========================================================
 
 const markFailed = async (
-  id,
+  provider,
+  eventId,
   errorMessage
 ) => {
+  if (!provider || !eventId) {
+    return null;
+  }
 
-  return WebhookEvent.findByIdAndUpdate(
-    id,
+  return WebhookEvent.findOneAndUpdate(
+    {
+      provider: String(provider).trim().toLowerCase(),
+      eventId: String(eventId).trim(),
+    },
     {
       $set: {
         status: "failed",
+        processedAt: new Date(),
         errorMessage:
           errorMessage ||
           "Webhook processing failed",
       },
     },
     {
-      returnDocument: "after",
+      new: true,
       runValidators: true,
     }
   );
@@ -123,15 +145,9 @@ const markFailed = async (
 // =========================================================
 
 module.exports = {
-
   findByEventId,
-
   create,
-
   markProcessing,
-
   markProcessed,
-
   markFailed,
-
 };
