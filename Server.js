@@ -192,7 +192,6 @@ const startServer = async () => {
 
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`🌐 Frontend allowed: ${frontendUrl}`);
     });
   } catch (error) {
     console.error("❌ Failed to start server");
