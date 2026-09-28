@@ -129,6 +129,18 @@ const startServer = async () => {
     // ==========================
     // PAYMENT WEBHOOK ROUTES
     // ==========================
+    app.use("/api/webhooks", (req, res, next) => {
+      console.log("🔥 LOAN WEBHOOK REQUEST RECEIVED");
+      console.log("METHOD:", req.method);
+      console.log("URL:", req.originalUrl);
+      console.log("CONTENT-TYPE:", req.headers["content-type"]);
+      console.log(
+        "LOAN SECRET PRESENT:",
+        !!req.headers["x-loan-webhook-secret"],
+      );
+      next();
+    });
+
     app.use("/api/webhooks", PaymentWebhookRoutes);
 
     // ==========================
