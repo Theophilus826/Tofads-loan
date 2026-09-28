@@ -62,11 +62,25 @@ const startServer = async () => {
     // ==========================
     // CORS
     // ==========================
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const allowedOrigins = [
+      "http://localhost:5173",
+      "https://ttservice-loan.onrender.com",
+    ];
 
     app.use(
       cors({
-        origin: frontendUrl,
+        origin: function (origin, callback) {
+          // Allow requests with no origin (Postman, mobile apps, server-to-server, etc.)
+          if (!origin) {
+            return callback(null, true);
+          }
+
+          if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+          }
+
+          return callback(new Error("Not allowed by CORS"));
+        },
         credentials: true,
       }),
     );
