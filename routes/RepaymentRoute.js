@@ -19,15 +19,18 @@ const {
 
 const router = express.Router();
 
+
 // =========================================================
 // REPAYMENT SCHEDULE
 // =========================================================
 
 router.get(
-  "/schedule/:loanApplicationId",
+  "/schedule/:repaymentScheduleId",
   protect,
   getRepaymentSchedule
 );
+
+
 
 // =========================================================
 // REPAYMENT HISTORY

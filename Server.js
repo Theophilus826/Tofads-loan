@@ -33,6 +33,8 @@ const RepaymentWebhookRoutes = require("./routes/RepaymentWebhookRoute");
 
 const { startScheduler } = require("./jobs/scheduler");
 
+const RepaymentAccountRoutes = require("./routes/RepaymentAccountRoute");
+
 const VerificationRoutes = require("./routes/VerificationRoute");
 const LedgerRoutes = require("./routes/LedgerRoute");
 const adminLedgerRoutes = require("./routes/AdminLedgerRoute");
@@ -101,33 +103,51 @@ const startServer = async () => {
     app.use(cookieParser());
 
     // =========================================================
-    // PAYSTACK PAYMENT WEBHOOK
+    // PAYSTACK WEBHOOK
+    // =========================================================
+    //
     // IMPORTANT:
-    // THIS MUST COME BEFORE express.json()
+    // Paystack signature verification requires the EXACT raw
+    // request body.
+    //
+    // This route MUST be registered BEFORE express.json().
+    //
+    // POST /api/webhooks/webhook
+    //
     // =========================================================
 
-    app.use("/api/webhooks", (req, res, next) => {
-      console.log("🔥 LOAN WEBHOOK REQUEST RECEIVED");
-      console.log("METHOD:", req.method);
-      console.log("URL:", req.originalUrl);
-      console.log(
-        "CONTENT-TYPE:",
-        req.headers["content-type"] || null,
-      );
-      console.log(
-        "LOAN SECRET PRESENT:",
-        !!req.headers["x-loan-webhook-secret"],
-      );
+    app.use(
+      "/api/webhooks",
+      express.raw({
+        type: "application/json",
+      }),
+      (req, res, next) => {
+        // Preserve the exact raw body for Paystack HMAC verification.
+        req.rawBody = req.body;
 
-      next();
-    });
+        console.log("🔥 PAYMENT WEBHOOK REQUEST RECEIVED");
+        console.log("METHOD:", req.method);
+        console.log("URL:", req.originalUrl);
+        console.log(
+          "CONTENT-TYPE:",
+          req.headers["content-type"] || null,
+        );
+        console.log(
+          "PAYSTACK SIGNATURE PRESENT:",
+          !!req.headers["x-paystack-signature"],
+        );
+        console.log(
+          "LOAN SECRET PRESENT:",
+          !!req.headers["x-loan-webhook-secret"],
+        );
 
-    app.use("/api/webhooks", PaymentWebhookRoutes);
+        next();
+      },
+      PaymentWebhookRoutes,
+    );
 
     // =========================================================
     // NORMAL BODY PARSERS
-    // IMPORTANT:
-    // These come AFTER the Paystack webhook route.
     // =========================================================
 
     app.use(express.json());
@@ -205,16 +225,30 @@ const startServer = async () => {
     app.use("/api/fraud", fraudRoutes);
 
     // ==========================
-    // DISBURSEMENT ROUTES
+    // DISBURSEMENT
     // ==========================
 
     app.use("/api/disbursements", DisbursementRoutes);
 
     // ==========================
-    // REPAYMENT ROUTES
+    // REPAYMENT
     // ==========================
 
     app.use("/api/repayments", RepaymentRoutes);
+
+    // ==========================
+    // REPAYMENT ACCOUNT
+    // ==========================
+    //
+    // GET  /api/repayment-account
+    // GET  /api/repayment-account/balance
+    // POST /api/repayment-account/fund
+    // GET  /api/repayment-account/transactions
+    // GET  /api/repayment-account/transactions/:transactionId
+    //
+    // ==========================
+
+    app.use("/api", RepaymentAccountRoutes);
 
     // =========================================================
     // REPAYMENT WEBHOOK
@@ -222,9 +256,7 @@ const startServer = async () => {
     //
     // POST /api/webhooks/payment
     //
-    // This is separate from the Paystack transfer webhook:
-    //
-    // POST /api/webhooks/webhook
+    // Keep this AFTER the Paystack webhook above.
     //
     // =========================================================
 
@@ -294,13 +326,19 @@ const startServer = async () => {
     // ADMIN LOAN PRODUCTS
     // ==========================
 
-    app.use("/api/admin/loan-products", adminLoanProductRoutes);
+    app.use(
+      "/api/admin/loan-products",
+      adminLoanProductRoutes,
+    );
 
     // ==========================
     // ADMIN BORROWERS
     // ==========================
 
-    app.use("/api/admin/borrowers", adminBorrowerRoutes);
+    app.use(
+      "/api/admin/borrowers",
+      adminBorrowerRoutes,
+    );
 
     // ==========================
     // ADMIN DISBURSEMENTS
@@ -315,7 +353,10 @@ const startServer = async () => {
     // NOTIFICATIONS
     // ==========================
 
-    app.use("/api/notifications", NotificationRoutes);
+    app.use(
+      "/api/notifications",
+      NotificationRoutes,
+    );
 
     // ==========================
     // ERROR HANDLER
@@ -333,10 +374,21 @@ const startServer = async () => {
       console.log("=================================");
       console.log("🚀 Server started successfully");
       console.log(`📡 Port: ${PORT}`);
+      console.log("");
       console.log("💳 Paystack webhook:");
       console.log("   POST /api/webhooks/webhook");
+      console.log("");
       console.log("💰 Repayment webhook:");
       console.log("   POST /api/webhooks/payment");
+      console.log("");
+      console.log("🏦 Repayment account:");
+      console.log("   GET  /api/repayment-account");
+      console.log("   GET  /api/repayment-account/balance");
+      console.log("   POST /api/repayment-account/fund");
+      console.log("   GET  /api/repayment-account/transactions");
+      console.log(
+        "   GET  /api/repayment-account/transactions/:transactionId",
+      );
       console.log("=================================");
     });
   } catch (error) {
@@ -351,3 +403,4 @@ const startServer = async () => {
 // RUN SERVER
 // ==========================
 startServer();
+

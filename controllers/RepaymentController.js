@@ -10,52 +10,49 @@ const RepaymentService = require(
 "../services/RepaymentService"
 );
 
+
 // =========================================================
 // GET REPAYMENT SCHEDULE
 // =========================================================
 
 const getRepaymentSchedule = async (
-req,
-res,
-next
+  req,
+  res,
+  next,
 ) => {
-try {
-const { loanApplicationId } =
-req.params;
+  try {
+    const { repaymentScheduleId } = req.params;
 
+    if (!repaymentScheduleId) {
+      return res.status(400).json({
+        success: false,
+        message: "Repayment schedule ID is required",
+      });
+    }
 
-if (!loanApplicationId) {
-  return res.status(400).json({
-    success: false,
-    message:
-      "Loan application ID is required",
-  });
-}
+    const schedule =
+      await RepaymentScheduleRepository.findById(
+        repaymentScheduleId,
+        req.user._id,
+      );
 
-const schedule =
-  await RepaymentScheduleRepository.findByLoanApplication(
-    loanApplicationId,
-    req.user._id
-  );
+    if (!schedule) {
+      return res.status(404).json({
+        success: false,
+        message: "Repayment schedule not found",
+      });
+    }
 
-if (!schedule) {
-  return res.status(404).json({
-    success: false,
-    message:
-      "Repayment schedule not found",
-  });
-}
-
-return res.status(200).json({
-  success: true,
-  data: schedule,
-});
-
-
-} catch (error) {
-return next(error);
-}
+    return res.status(200).json({
+      success: true,
+      data: schedule,
+    });
+  } catch (error) {
+    return next(error);
+  }
 };
+
+
 
 // =========================================================
 // INITIATE REPAYMENT

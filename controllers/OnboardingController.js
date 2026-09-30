@@ -1,3 +1,4 @@
+
 const Kyc = require("../model/Kyc");
 const BankAccount = require("../model/BankAccountModel");
 const LoanApplication = require("../model/LoanApplication");
@@ -5,6 +6,7 @@ const LoanOffer = require("../model/LoanOfferModel");
 const Loan = require("../model/Loan");
 const Mandate = require("../model/MandateModel");
 const RepaymentSchedule = require("../model/RepaymentScheduleModel");
+const RepaymentAccount = require("../model/RepaymentAccountModel");
 
 const getOnboardingStatus = async (req, res) => {
   try {
@@ -20,10 +22,7 @@ const getOnboardingStatus = async (req, res) => {
     // =========================================================
     // KYC
     // =========================================================
-    //
-    // KYC is intentionally NOT blocking onboarding.
-    // Any existing KYC record counts as completed.
-    //
+
     const kyc = await Kyc.findOne({
       user: userId,
     }).sort({ createdAt: -1 });
@@ -31,10 +30,7 @@ const getOnboardingStatus = async (req, res) => {
     // =========================================================
     // BANK ACCOUNT
     // =========================================================
-    //
-    // A verified primary bank account is required before
-    // submitting a loan application.
-    //
+
     const bankAccount = await BankAccount.findOne({
       user: userId,
       isPrimary: true,
@@ -44,10 +40,7 @@ const getOnboardingStatus = async (req, res) => {
     // =========================================================
     // LOAN APPLICATION
     // =========================================================
-    //
-    // The user submits a LoanApplication before a Loan exists.
-    // Therefore onboarding must check applications as well.
-    //
+
     const activeApplicationStatuses = [
       "submitted",
       "pending",
@@ -58,25 +51,22 @@ const getOnboardingStatus = async (req, res) => {
       "disbursed",
     ];
 
-    const loanApplication =
-      await LoanApplication.findOne({
-        user: userId,
-        status: {
-          $in: activeApplicationStatuses,
-        },
-      })
-        .populate(
-          "loanProduct",
-          "name code currency"
-        )
-        .sort({ createdAt: -1 });
+    const loanApplication = await LoanApplication.findOne({
+      user: userId,
+      status: {
+        $in: activeApplicationStatuses,
+      },
+    })
+      .populate(
+        "loanProduct",
+        "name code currency",
+      )
+      .sort({ createdAt: -1 });
 
     // =========================================================
     // ACTUAL LOAN
     // =========================================================
-    //
-    // These are the actual statuses used by Loan.js.
-    //
+
     const activeLoanStatuses = [
       "pending_disbursement",
       "disbursing",
@@ -93,12 +83,12 @@ const getOnboardingStatus = async (req, res) => {
     })
       .populate(
         "loanProduct",
-        "name code currency"
+        "name code currency",
       )
       .sort({ createdAt: -1 });
 
     // =========================================================
-    // ACTIVE OFFER / REPAYMENT STATE
+    // ACTIVE OFFER
     // =========================================================
 
     const activeOffer = await LoanOffer.findOne({
@@ -109,6 +99,10 @@ const getOnboardingStatus = async (req, res) => {
     })
       .populate("loanApplication")
       .sort({ createdAt: -1 });
+
+    // =========================================================
+    // REPAYMENT SCHEDULE
+    // =========================================================
 
     const activeRepayment = await RepaymentSchedule.findOne({
       user: userId,
@@ -125,9 +119,28 @@ const getOnboardingStatus = async (req, res) => {
       .populate("loan")
       .sort({ createdAt: -1 });
 
+    // =========================================================
+    // REPAYMENT ACCOUNT
+    // =========================================================
+    //
+    // The repayment account is reusable for future repayments.
+    // It is NOT the same thing as a repayment schedule.
+    //
+    const repaymentAccount = await RepaymentAccount.findOne({
+      user: userId,
+    }).sort({ createdAt: -1 });
+
+    // =========================================================
+    // ACTIVE MANDATE
+    // =========================================================
+
     const activeMandate = await Mandate.findOne({
       user: userId,
-      loanOffer: activeOffer?._id,
+      ...(activeOffer?._id
+        ? {
+            loanOffer: activeOffer._id,
+          }
+        : {}),
       status: {
         $in: [
           "pending",
@@ -139,7 +152,20 @@ const getOnboardingStatus = async (req, res) => {
     }).sort({ createdAt: -1 });
 
     // =========================================================
-    // DETERMINE NEXT STEP
+    // REPAYMENT ACCOUNT STATE
+    // =========================================================
+
+    const hasRepaymentAccount =
+      !!repaymentAccount;
+
+    const repaymentAccountActive =
+      repaymentAccount?.status === "active";
+
+    const repaymentAccountBalance =
+      Number(repaymentAccount?.balance || 0);
+
+    // =========================================================
+    // MANDATE STATE
     // =========================================================
 
     const hasCurrentMandate = Boolean(
@@ -149,8 +175,12 @@ const getOnboardingStatus = async (req, res) => {
           "authorization_required",
           "authorized",
           "active",
-        ].includes(activeMandate.status)
+        ].includes(activeMandate.status),
     );
+
+    // =========================================================
+    // DETERMINE NEXT STEP
+    // =========================================================
 
     let nextStep = "KYC";
 
@@ -163,6 +193,12 @@ const getOnboardingStatus = async (req, res) => {
       [
         "pending_disbursement",
         "disbursing",
+      ].includes(loan.status)
+    ) {
+      nextStep = "DISBURSEMENT";
+    } else if (
+      loan &&
+      [
         "active",
         "overdue",
         "defaulted",
@@ -178,12 +214,14 @@ const getOnboardingStatus = async (req, res) => {
     } else if (
       activeOffer &&
       ["pending", "accepted"].includes(
-        activeOffer.status
+        activeOffer.status,
       )
     ) {
       nextStep = "OFFER";
-    } else if (loanApplication || loan) {
-      // The user already has a loan request or actual loan.
+    } else if (
+      loanApplication ||
+      loan
+    ) {
       nextStep = "REVIEW";
     } else {
       nextStep = "LOAN";
@@ -206,6 +244,10 @@ const getOnboardingStatus = async (req, res) => {
       loanApplication?.status ||
       null;
 
+    // =========================================================
+    // IDS
+    // =========================================================
+
     const loanId = loan?._id || null;
 
     const applicationId =
@@ -222,19 +264,34 @@ const getOnboardingStatus = async (req, res) => {
         nextStep,
         currentStatus,
 
+        // =====================================================
+        // KYC
+        // =====================================================
+
         kyc: {
           completed: !!kyc,
           status: kyc?.status || "NOT_STARTED",
         },
 
+        // =====================================================
+        // BANK
+        // =====================================================
+
         bank: {
           completed: !!bankAccount,
           verified: !!bankAccount,
-          accountId: bankAccount?._id || null,
+          accountId:
+            bankAccount?._id || null,
         },
 
+        // =====================================================
+        // LOAN
+        // =====================================================
+
         loan: {
-          exists: !!loan || !!loanApplication,
+          exists:
+            !!loan ||
+            !!loanApplication,
 
           status: loanStatus,
 
@@ -243,7 +300,8 @@ const getOnboardingStatus = async (req, res) => {
           applicationId,
 
           applicationStatus:
-            loanApplication?.status || null,
+            loanApplication?.status ||
+            null,
 
           loanProduct:
             loanApplication?.loanProduct ||
@@ -251,38 +309,134 @@ const getOnboardingStatus = async (req, res) => {
             null,
         },
 
+        // =====================================================
+        // LOAN OFFER
+        // =====================================================
+
         loanOffer: {
           exists: !!activeOffer,
-          status: activeOffer?.status || null,
-          offerId: activeOffer?._id || null,
+
+          status:
+            activeOffer?.status ||
+            null,
+
+          offerId:
+            activeOffer?._id ||
+            null,
+
           acceptedAt:
-            activeOffer?.acceptedAt || null,
+            activeOffer?.acceptedAt ||
+            null,
         },
+
+        // =====================================================
+        // REPAYMENT ACCOUNT
+        // =====================================================
+        //
+        // Reusable customer repayment wallet/account.
+        //
+        repaymentAccount: {
+          exists: hasRepaymentAccount,
+
+          accountId:
+            repaymentAccount?._id ||
+            null,
+
+          accountNumber:
+            repaymentAccount?.accountNumber ||
+            null,
+
+          accountName:
+            repaymentAccount?.accountName ||
+            null,
+
+          bankName:
+            repaymentAccount?.bankName ||
+            null,
+
+          currency:
+            repaymentAccount?.currency ||
+            "NGN",
+
+          balance:
+            repaymentAccountBalance,
+
+          totalCredited:
+            Number(
+              repaymentAccount?.totalCredited ||
+                0,
+            ),
+
+          totalRepaid:
+            Number(
+              repaymentAccount?.totalRepaid ||
+                0,
+            ),
+
+          status:
+            repaymentAccount?.status ||
+            "NOT_CREATED",
+
+          active:
+            repaymentAccountActive,
+
+          provider:
+            repaymentAccount?.provider ||
+            null,
+        },
+
+        // =====================================================
+        // REPAYMENT SCHEDULE
+        // =====================================================
 
         repayment: {
           exists: !!activeRepayment,
-          status: activeRepayment?.status || null,
+
+          status:
+            activeRepayment?.status ||
+            null,
+
           repaymentScheduleId:
-            activeRepayment?._id || null,
+            activeRepayment?._id ||
+            null,
+
+          loanId:
+            activeRepayment?.loan?._id ||
+            activeRepayment?.loan ||
+            null,
         },
+
+        // =====================================================
+        // MANDATE
+        // =====================================================
 
         mandate: {
           exists: !!activeMandate,
-          status: activeMandate?.status || null,
-          mandateId: activeMandate?._id || null,
-          offerId: activeMandate?.loanOffer || null,
+
+          status:
+            activeMandate?.status ||
+            null,
+
+          mandateId:
+            activeMandate?._id ||
+            null,
+
+          offerId:
+            activeMandate?.loanOffer ||
+            null,
         },
       },
     });
   } catch (error) {
     console.error(
       "Onboarding status error:",
-      error
+      error,
     );
 
     return res.status(500).json({
       success: false,
-      message: "Unable to load onboarding status",
+      message:
+        "Unable to load onboarding status",
     });
   }
 };
@@ -290,3 +444,4 @@ const getOnboardingStatus = async (req, res) => {
 module.exports = {
   getOnboardingStatus,
 };
+

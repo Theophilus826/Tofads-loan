@@ -17,6 +17,13 @@ const mandateSchema = new mongoose.Schema(
       index: true,
     },
 
+    loan: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Loan",
+      default: null,
+      index: true,
+    },
+
     loanOffer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "LoanOffer",
@@ -34,16 +41,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // INTERNAL REFERENCE
     // =====================================================
-    //
-    // Example:
-    //
-    // MND-1789816489923-49f517409d613082
-    //
-    // This is OUR application reference.
-    //
-    // It is also used as the Paystack transaction reference
-    // when initializing the card authorization transaction.
-    //
 
     mandateReference: {
       type: String,
@@ -68,12 +65,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // PROVIDER MANDATE ID
     // =====================================================
-    //
-    // Kept for compatibility/future provider support.
-    //
-    // Standard Paystack card authorization does not require
-    // a separate provider mandate ID.
-    //
 
     providerMandateId: {
       type: String,
@@ -95,9 +86,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // PROVIDER DATA
     // =====================================================
-    //
-    // Raw/sanitized Paystack response data.
-    //
 
     providerData: {
       type: mongoose.Schema.Types.Mixed,
@@ -107,10 +95,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // AUTHORIZATION URL
     // =====================================================
-    //
-    // Paystack URL where the customer enters/authorizes
-    // their card.
-    //
 
     authorizationUrl: {
       type: String,
@@ -121,20 +105,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // PAYSTACK TRANSACTION REFERENCE
     // =====================================================
-    //
-    // IMPORTANT:
-    //
-    // This is the Paystack transaction reference returned
-    // from:
-    //
-    // POST /transaction/initialize
-    //
-    // It is used to verify the initial card transaction:
-    //
-    // GET /transaction/verify/:reference
-    //
-    // It is NOT the authorization code.
-    //
 
     authorizationReference: {
       type: String,
@@ -146,19 +116,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // PAYSTACK AUTHORIZATION CODE
     // =====================================================
-    //
-    // Returned after successful card authorization:
-    //
-    // data.authorization.authorization_code
-    //
-    // This is the reusable authorization credential used
-    // for future loan repayment charges.
-    //
-    // It must NEVER be confused with authorizationReference.
-    //
-    // select:false prevents accidental exposure in normal
-    // queries.
-    //
 
     authorizationCode: {
       type: String,
@@ -170,16 +127,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // CARD INFORMATION
     // =====================================================
-    //
-    // We NEVER store:
-    //
-    // - full card number
-    // - CVV
-    // - PIN
-    //
-    // Only non-sensitive card metadata returned by Paystack
-    // is retained.
-    //
 
     card: {
       cardType: {
@@ -259,19 +206,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // REPAYMENT MANDATE LIMIT
     // =====================================================
-    //
-    // Maximum amount represented by the loan repayment
-    // mandate in OUR application.
-    //
-    // This is NOT the card authorization transaction amount.
-    //
-    // Example:
-    //
-    // amountLimit = 150000
-    //
-    // means the loan's repayment authorization is associated
-    // with ₦150,000.
-    //
 
     amountLimit: {
       type: Number,
@@ -282,16 +216,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // CARD AUTHORIZATION TRANSACTION
     // =====================================================
-    //
-    // A small initial transaction is used to establish the
-    // reusable Paystack card authorization.
-    //
-    // Stored in NAIRA.
-    //
-    // Example:
-    //
-    // 50 = ₦50.00
-    //
 
     activationChargeAmount: {
       type: Number,
@@ -320,10 +244,6 @@ const mandateSchema = new mongoose.Schema(
     // =====================================================
     // INITIAL CARD TRANSACTION REFERENCE
     // =====================================================
-    //
-    // Normally this will correspond to the Paystack
-    // transaction reference.
-    //
 
     activationChargeReference: {
       type: String,
@@ -444,6 +364,12 @@ mandateSchema.index({
 
 mandateSchema.index({
   user: 1,
+  loan: 1,
+  status: 1,
+});
+
+mandateSchema.index({
+  user: 1,
   loanOffer: 1,
 });
 
@@ -454,6 +380,11 @@ mandateSchema.index({
 
 mandateSchema.index({
   loanApplication: 1,
+  status: 1,
+});
+
+mandateSchema.index({
+  loan: 1,
   status: 1,
 });
 
@@ -490,12 +421,6 @@ mandateSchema.index(
 // =========================================================
 // AUTHORIZATION CODE INDEX
 // =========================================================
-//
-// The Paystack authorization code must be unique.
-//
-// This is the reusable credential used for future
-// repayment charges.
-//
 
 mandateSchema.index(
   {
@@ -618,18 +543,6 @@ mandateSchema.pre("validate", function () {
   // =======================================================
   // AUTHORIZATION CONSISTENCY
   // =======================================================
-  //
-  // authorizationReference and authorizationCode are
-  // completely different Paystack values.
-  //
-  // authorizationReference:
-  //   transaction reference used for verification
-  //
-  // authorizationCode:
-  //   reusable card credential used for future charges
-  //
-  // Never copy one into the other.
-  //
 
   if (
     this.authorizationCode &&
@@ -643,10 +556,6 @@ mandateSchema.pre("validate", function () {
   // =======================================================
   // ACTIVE AUTHORIZATION CONSISTENCY
   // =======================================================
-  //
-  // An active card mandate should have a reusable
-  // authorization code.
-  //
 
   if (
     this.status === "active" &&
@@ -654,6 +563,20 @@ mandateSchema.pre("validate", function () {
   ) {
     throw new Error(
       "Active card mandate requires a Paystack authorization code"
+    );
+  }
+
+  // =======================================================
+  // ACTIVE CARD CONSISTENCY
+  // =======================================================
+
+  if (
+    this.status === "active" &&
+    this.card &&
+    this.card.reusable === false
+  ) {
+    throw new Error(
+      "Active mandate requires a reusable card authorization"
     );
   }
 });
@@ -670,7 +593,6 @@ const Mandate = mongoose.model(
   "Mandate",
   mandateSchema
 );
-
 
 // =========================================================
 // EXPORT

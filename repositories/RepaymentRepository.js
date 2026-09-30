@@ -5,15 +5,15 @@ const Repayment = require("../model/RepaymentModel");
 // =========================================================
 
 const create = async (
-data,
-options = {}
+  data,
+  options = {}
 ) => {
-const result = await Repayment.create(
-[data],
-options
-);
+  const result = await Repayment.create(
+    [data],
+    options
+  );
 
-return result[0];
+  return result[0];
 };
 
 // =========================================================
@@ -21,24 +21,47 @@ return result[0];
 // =========================================================
 
 const findById = async (
-repaymentId,
-userId
+  repaymentId,
+  userId
 ) => {
-return Repayment.findOne({
-_id: repaymentId,
-user: userId,
-})
-.populate(
-"loan",
-"loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
-)
-.populate(
-"repaymentSchedule"
-)
-.populate(
-"loanApplication",
-"applicationNumber amountRequested status"
-);
+  return Repayment.findOne({
+    _id: repaymentId,
+    user: userId,
+  })
+    .populate(
+      "loan",
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
+    )
+    .populate("repaymentSchedule")
+    .populate(
+      "loanApplication",
+      "applicationNumber amountRequested status"
+    );
+};
+
+// =========================================================
+// CUSTOMER - WITH SESSION
+// =========================================================
+
+const findByIdWithSession = async (
+  repaymentId,
+  userId,
+  session
+) => {
+  return Repayment.findOne({
+    _id: repaymentId,
+    user: userId,
+  })
+    .session(session)
+    .populate(
+      "loan",
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
+    )
+    .populate("repaymentSchedule")
+    .populate(
+      "loanApplication",
+      "applicationNumber amountRequested status"
+    );
 };
 
 // =========================================================
@@ -46,17 +69,18 @@ user: userId,
 // =========================================================
 
 const findByIdInternal = async (
-repaymentId,
-session = null
+  repaymentId,
+  session = null
 ) => {
-const query =
-Repayment.findById(repaymentId);
+  const query = Repayment.findById(
+    repaymentId
+  );
 
-if (session) {
-query.session(session);
-}
+  if (session) {
+    query.session(session);
+  }
 
-return query;
+  return query;
 };
 
 // =========================================================
@@ -64,26 +88,32 @@ return query;
 // =========================================================
 
 const findByIdAdmin = async (
-repaymentId
+  repaymentId
 ) => {
-return Repayment.findById(
-repaymentId
-)
-.populate(
-"user",
-"firstName lastName name email phone"
-)
-.populate(
-"loan",
-"loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
-)
-.populate(
-"loanApplication",
-"applicationNumber amountRequested status"
-)
-.populate(
-"repaymentSchedule"
-);
+  return Repayment.findById(
+    repaymentId
+  )
+    .populate(
+      "user",
+      "firstName lastName name email phone"
+    )
+    .populate(
+      "loan",
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
+    )
+    .populate(
+      "loanApplication",
+      "applicationNumber amountRequested status"
+    )
+    .populate(
+      "repaymentSchedule"
+    )
+    .populate(
+      "repaymentAccount"
+    )
+    .populate(
+      "mandate"
+    );
 };
 
 // =========================================================
@@ -91,19 +121,19 @@ repaymentId
 // =========================================================
 
 const findByProviderReference = async (
-providerReference
+  providerReference
 ) => {
-if (
-!providerReference ||
-!String(providerReference).trim()
-) {
-return null;
-}
+  if (
+    !providerReference ||
+    !String(providerReference).trim()
+  ) {
+    return null;
+  }
 
-return Repayment.findOne({
-providerReference:
-String(providerReference).trim(),
-});
+  return Repayment.findOne({
+    providerReference:
+      String(providerReference).trim(),
+  });
 };
 
 // =========================================================
@@ -111,19 +141,19 @@ String(providerReference).trim(),
 // =========================================================
 
 const findByPaymentReference = async (
-paymentReference
+  paymentReference
 ) => {
-if (
-!paymentReference ||
-!String(paymentReference).trim()
-) {
-return null;
-}
+  if (
+    !paymentReference ||
+    !String(paymentReference).trim()
+  ) {
+    return null;
+  }
 
-return Repayment.findOne({
-paymentReference:
-String(paymentReference).trim(),
-});
+  return Repayment.findOne({
+    paymentReference:
+      String(paymentReference).trim(),
+  });
 };
 
 // =========================================================
@@ -131,29 +161,70 @@ String(paymentReference).trim(),
 // =========================================================
 
 const findPendingByReference = async (
-paymentReference
+  paymentReference,
+  session = null
 ) => {
-if (
-!paymentReference ||
-!String(paymentReference).trim()
-) {
-return null;
-}
+  if (
+    !paymentReference ||
+    !String(paymentReference).trim()
+  ) {
+    return null;
+  }
 
-return Repayment.findOne({
-paymentReference:
-String(paymentReference).trim(),
+  const query = Repayment.findOne({
+    paymentReference:
+      String(paymentReference).trim(),
 
+    status: {
+      $in: [
+        "pending",
+        "processing",
+      ],
+    },
+  });
 
-status: {
-  $in: [
-    "pending",
-    "processing",
-  ],
-},
+  if (session) {
+    query.session(session);
+  }
 
+  return query;
+};
 
-});
+// =========================================================
+// BY PROVIDER REFERENCE + STATUS
+// =========================================================
+//
+// Useful for webhook idempotency.
+//
+
+const findPendingByProviderReference = async (
+  providerReference,
+  session = null
+) => {
+  if (
+    !providerReference ||
+    !String(providerReference).trim()
+  ) {
+    return null;
+  }
+
+  const query = Repayment.findOne({
+    providerReference:
+      String(providerReference).trim(),
+
+    status: {
+      $in: [
+        "pending",
+        "processing",
+      ],
+    },
+  });
+
+  if (session) {
+    query.session(session);
+  }
+
+  return query;
 };
 
 // =========================================================
@@ -161,18 +232,21 @@ status: {
 // =========================================================
 
 const findByLoan = async (
-loanId
+  loanId
 ) => {
-return Repayment.find({
-loan: loanId,
-})
-.populate(
-"loan",
-"loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
-)
-.sort({
-createdAt: -1,
-});
+  return Repayment.find({
+    loan: loanId,
+  })
+    .populate(
+      "loan",
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
+    )
+    .populate(
+      "repaymentSchedule"
+    )
+    .sort({
+      createdAt: -1,
+    });
 };
 
 // =========================================================
@@ -180,14 +254,14 @@ createdAt: -1,
 // =========================================================
 
 const findBySchedule = async (
-repaymentScheduleId
+  repaymentScheduleId
 ) => {
-return Repayment.find({
-repaymentSchedule:
-repaymentScheduleId,
-}).sort({
-createdAt: -1,
-});
+  return Repayment.find({
+    repaymentSchedule:
+      repaymentScheduleId,
+  }).sort({
+    createdAt: -1,
+  });
 };
 
 // =========================================================
@@ -195,26 +269,79 @@ createdAt: -1,
 // =========================================================
 
 const findByUser = async (
-userId
+  userId
 ) => {
-return Repayment.find({
-user: userId,
-})
-.populate(
-"loan",
-"loanNumber principalAmount totalRepayment amountPaid outstandingAmount status"
-)
-.populate(
-"repaymentSchedule",
-"principalAmount totalRepaymentAmount amountPaid amountOutstanding status startDate finalDueDate"
-)
-.populate(
-"loanApplication",
-"applicationNumber amountRequested status"
-)
-.sort({
-createdAt: -1,
-});
+  return Repayment.find({
+    user: userId,
+  })
+    .populate(
+      "loan",
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status"
+    )
+    .populate(
+      "repaymentSchedule",
+      "principalAmount totalRepaymentAmount amountPaid amountOutstanding status startDate finalDueDate"
+    )
+    .populate(
+      "loanApplication",
+      "applicationNumber amountRequested status"
+    )
+    .populate(
+      "repaymentAccount",
+      "accountNumber accountName bankName currency balance status"
+    )
+    .populate(
+      "mandate",
+      "mandateReference provider status amountLimit frequency startDate endDate card"
+    )
+    .sort({
+      createdAt: -1,
+    });
+};
+
+// =========================================================
+// BY USER + SOURCE
+// =========================================================
+
+const findByUserAndSource = async (
+  userId,
+  repaymentSource
+) => {
+  return Repayment.find({
+    user: userId,
+    repaymentSource,
+  }).sort({
+    createdAt: -1,
+  });
+};
+
+// =========================================================
+// BY REPAYMENT ACCOUNT
+// =========================================================
+
+const findByRepaymentAccount = async (
+  repaymentAccountId
+) => {
+  return Repayment.find({
+    repaymentAccount:
+      repaymentAccountId,
+  }).sort({
+    createdAt: -1,
+  });
+};
+
+// =========================================================
+// BY MANDATE
+// =========================================================
+
+const findByMandate = async (
+  mandateId
+) => {
+  return Repayment.find({
+    mandate: mandateId,
+  }).sort({
+    createdAt: -1,
+  });
 };
 
 // =========================================================
@@ -222,76 +349,93 @@ createdAt: -1,
 // =========================================================
 
 const findAll = async ({
-status = null,
-page = 1,
-limit = 20,
+  status = null,
+  repaymentSource = null,
+  userId = null,
+  loanId = null,
+  page = 1,
+  limit = 20,
 } = {}) => {
-const query = {};
+  const query = {};
 
-if (status) {
-query.status = status;
-}
+  if (status) {
+    query.status = status;
+  }
 
-const safePage = Math.max(
-1,
-Number(page) || 1
-);
+  if (repaymentSource) {
+    query.repaymentSource =
+      repaymentSource;
+  }
 
-const safeLimit = Math.min(
-100,
-Math.max(
-1,
-Number(limit) || 20
-)
-);
+  if (userId) {
+    query.user = userId;
+  }
 
-const skip =
-(safePage - 1) *
-safeLimit;
+  if (loanId) {
+    query.loan = loanId;
+  }
 
-const [
-items,
-total,
-] = await Promise.all([
-Repayment.find(query)
-.populate(
-"user",
-"firstName lastName name email phone"
-)
-.populate(
-"loan",
-"loanNumber principalAmount totalRepayment amountPaid outstandingAmount status"
-)
-.populate(
-"loanApplication",
-"applicationNumber amountRequested status"
-)
-.populate(
-"repaymentSchedule",
-"principalAmount totalRepaymentAmount amountPaid amountOutstanding status"
-)
-.sort({
-createdAt: -1,
-})
-.skip(skip)
-.limit(safeLimit),
+  const safePage = Math.max(
+    1,
+    Number(page) || 1
+  );
 
-```
-Repayment.countDocuments(query),
-```
+  const safeLimit = Math.min(
+    100,
+    Math.max(
+      1,
+      Number(limit) || 20
+    )
+  );
 
-]);
+  const skip =
+    (safePage - 1) *
+    safeLimit;
 
-return {
-items,
-total,
-page: safePage,
-limit: safeLimit,
-totalPages:
-Math.ceil(
-total / safeLimit
-),
-};
+  const [
+    items,
+    total,
+  ] = await Promise.all([
+    Repayment.find(query)
+      .populate(
+        "user",
+        "firstName lastName name email phone"
+      )
+      .populate(
+        "loan",
+        "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status"
+      )
+      .populate(
+        "loanApplication",
+        "applicationNumber amountRequested status"
+      )
+      .populate(
+        "repaymentSchedule",
+        "principalAmount totalRepaymentAmount amountPaid amountOutstanding status"
+      )
+      .populate(
+        "repaymentAccount",
+        "accountNumber accountName bankName currency balance status"
+      )
+      .sort({
+        createdAt: -1,
+      })
+      .skip(skip)
+      .limit(safeLimit),
+
+    Repayment.countDocuments(query),
+  ]);
+
+  return {
+    items,
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages:
+      Math.ceil(
+        total / safeLimit
+      ),
+  };
 };
 
 // =========================================================
@@ -299,21 +443,21 @@ total / safeLimit
 // =========================================================
 
 const updateById = async (
-repaymentId,
-update,
-options = {}
+  repaymentId,
+  update,
+  options = {}
 ) => {
-return Repayment.findByIdAndUpdate(
-repaymentId,
-{
-$set: update,
-},
-{
-returnDocument: "after",
-runValidators: true,
-...options,
-}
-);
+  return Repayment.findByIdAndUpdate(
+    repaymentId,
+    {
+      $set: update,
+    },
+    {
+      returnDocument: "after",
+      runValidators: true,
+      ...options,
+    }
+  );
 };
 
 // =========================================================
@@ -321,31 +465,28 @@ runValidators: true,
 // =========================================================
 
 const updateStatusIfCurrent = async (
-repaymentId,
-currentStatuses,
-update,
-options = {}
+  repaymentId,
+  currentStatuses,
+  update,
+  options = {}
 ) => {
-return Repayment.findOneAndUpdate(
-{
-_id: repaymentId,
+  return Repayment.findOneAndUpdate(
+    {
+      _id: repaymentId,
 
-
-  status: {
-    $in: currentStatuses,
-  },
-},
-{
-  $set: update,
-},
-{
-  returnDocument: "after",
-  runValidators: true,
-  ...options,
-}
-
-
-);
+      status: {
+        $in: currentStatuses,
+      },
+    },
+    {
+      $set: update,
+    },
+    {
+      returnDocument: "after",
+      runValidators: true,
+      ...options,
+    }
+  );
 };
 
 // =========================================================
@@ -353,21 +494,27 @@ _id: repaymentId,
 // =========================================================
 
 module.exports = {
-create,
+  create,
 
-findById,
-findByIdInternal,
-findByIdAdmin,
+  findById,
+  findByIdWithSession,
+  findByIdInternal,
+  findByIdAdmin,
 
-findByProviderReference,
-findByPaymentReference,
-findPendingByReference,
+  findByProviderReference,
+  findByPaymentReference,
+  findPendingByReference,
+  findPendingByProviderReference,
 
-findByLoan,
-findBySchedule,
-findByUser,
-findAll,
+  findByLoan,
+  findBySchedule,
+  findByUser,
+  findByUserAndSource,
+  findByRepaymentAccount,
+  findByMandate,
 
-updateById,
-updateStatusIfCurrent,
+  findAll,
+
+  updateById,
+  updateStatusIfCurrent,
 };

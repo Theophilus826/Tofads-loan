@@ -1,4 +1,6 @@
+
 const crypto = require("crypto");
+
 const PaymentWebhookService = require("../services/PaymentWebhookService");
 
 // =========================================================
@@ -109,6 +111,31 @@ const verifyInternalLoanWebhook = (secret) => {
 };
 
 // =========================================================
+// PAYSTACK EVENTS
+// =========================================================
+
+const supportedPaystackEvents = new Set([
+  // Customer payments
+  "charge.success",
+  "charge.failed",
+
+  // Transfers
+  "transfer.success",
+  "transfer.failed",
+  "transfer.reversed",
+
+  // Some integrations may forward these
+  "payment.success",
+  "payment.failed",
+
+  // Auto-debit / recurring debit events
+  "subscription.create",
+  "invoice.create",
+  "invoice.payment_failed",
+  "invoice.update",
+]);
+
+// =========================================================
 // PAYMENT WEBHOOK
 // POST /api/webhooks/webhook
 // =========================================================
@@ -199,16 +226,6 @@ const handleWebhook = async (req, res, next) => {
     const eventData = payload?.data || {};
 
     // -----------------------------------------------------
-    // SUPPORTED PAYSTACK TRANSFER EVENTS
-    // -----------------------------------------------------
-
-    const supportedPaystackEvents = new Set([
-      "transfer.success",
-      "transfer.failed",
-      "transfer.reversed",
-    ]);
-
-    // -----------------------------------------------------
     // INTERNAL PRODUCT → LOAN REQUEST
     // -----------------------------------------------------
 
@@ -226,8 +243,14 @@ const handleWebhook = async (req, res, next) => {
         });
       }
 
+      const internalSupportedEvents = new Set([
+        "transfer.success",
+        "transfer.failed",
+        "transfer.reversed",
+      ]);
+
       if (
-        !supportedPaystackEvents.has(eventType)
+        !internalSupportedEvents.has(eventType)
       ) {
         return res.status(200).json({
           success: true,
@@ -243,7 +266,7 @@ const handleWebhook = async (req, res, next) => {
       );
     } else {
       // ---------------------------------------------------
-      // DIRECT PAYSTACK WEBHOOK
+      // DIRECT PROVIDER WEBHOOK
       // ---------------------------------------------------
 
       if (provider === "paystack") {

@@ -1,14 +1,25 @@
-const WebhookRepository = require("../repositories/WebhookRepository");
 
-const MandateRepository = require("../repositories/MandateRepository");
+const WebhookRepository =
+  require("../repositories/WebhookRepository");
 
-const RepaymentRepository = require("../repositories/RepaymentRepository");
+const MandateRepository =
+  require("../repositories/MandateRepository");
 
-const RepaymentService = require("./RepaymentService");
+const RepaymentRepository =
+  require("../repositories/RepaymentRepository");
 
-const AdminDisbursementService = require("./AdminDisbursementService");
+const RepaymentService =
+  require("./RepaymentService");
 
-const { verifyWebhookSignature } = require("../config/PaymentProvider");
+const RepaymentAccountService =
+  require("./RepaymentAccountService");
+
+const AdminDisbursementService =
+  require("./AdminDisbursementService");
+
+const {
+  verifyWebhookSignature,
+} = require("../config/PaymentProvider");
 
 // =========================================================
 // HELPERS
@@ -89,7 +100,11 @@ const getProviderCustomerId = (payload) => {
 // =========================================================
 
 const getCustomerEmail = (payload) => {
-  return payload?.customer?.email || payload?.data?.customer?.email || null;
+  return (
+    payload?.customer?.email ||
+    payload?.data?.customer?.email ||
+    null
+  );
 };
 
 // =========================================================
@@ -114,25 +129,37 @@ const getFailureReason = (payload, fallback) => {
 // FIND MANDATE
 // =========================================================
 
-const findMandateFromPayload = async (payload, eventType = null) => {
-  const providerReference = getProviderReference(payload);
+const findMandateFromPayload = async (
+  payload,
+  eventType = null
+) => {
+  const providerReference =
+    getProviderReference(payload);
 
-  const authorizationCode = getAuthorizationCode(payload);
+  const authorizationCode =
+    getAuthorizationCode(payload);
 
-  const providerCustomerId = getProviderCustomerId(payload);
+  const providerCustomerId =
+    getProviderCustomerId(payload);
 
   // -------------------------------------------------------
   // 1. PROVIDER MANDATE / AUTHORIZATION REFERENCE
   // -------------------------------------------------------
 
   if (providerReference) {
-    let mandate = await MandateRepository.findByProviderId(providerReference);
+    let mandate =
+      await MandateRepository.findByProviderId(
+        providerReference
+      );
 
     if (mandate) {
       return mandate;
     }
 
-    mandate = await MandateRepository.findByReference(providerReference);
+    mandate =
+      await MandateRepository.findByReference(
+        providerReference
+      );
 
     if (mandate) {
       return mandate;
@@ -145,7 +172,9 @@ const findMandateFromPayload = async (payload, eventType = null) => {
 
   if (authorizationCode) {
     const mandate =
-      await MandateRepository.findByAuthorizationCode(authorizationCode);
+      await MandateRepository.findByAuthorizationCode(
+        authorizationCode
+      );
 
     if (mandate) {
       return mandate;
@@ -159,19 +188,29 @@ const findMandateFromPayload = async (payload, eventType = null) => {
   if (providerCustomerId) {
     let mandate = null;
 
-    if (eventType === "direct_debit.authorization.created") {
+    if (
+      eventType ===
+      "direct_debit.authorization.created"
+    ) {
       mandate =
         await MandateRepository.findPendingByProviderCustomerId(
-          providerCustomerId,
+          providerCustomerId
         );
-    } else if (eventType === "direct_debit.authorization.active") {
+    } else if (
+      eventType ===
+      "direct_debit.authorization.active"
+    ) {
       mandate =
-        await MandateRepository.findByProviderCustomerId(providerCustomerId);
+        await MandateRepository.findByProviderCustomerId(
+          providerCustomerId
+        );
     }
 
     if (!mandate) {
       mandate =
-        await MandateRepository.findByProviderCustomerId(providerCustomerId);
+        await MandateRepository.findByProviderCustomerId(
+          providerCustomerId
+        );
     }
 
     if (mandate) {
@@ -183,30 +222,40 @@ const findMandateFromPayload = async (payload, eventType = null) => {
   // FAILURE
   // -------------------------------------------------------
 
-  const customerEmail = getCustomerEmail(payload);
+  const customerEmail =
+    getCustomerEmail(payload);
 
   if (customerEmail) {
     console.warn(
-      `Unable to match mandate webhook. ` + `Customer email: ${customerEmail}`,
+      `Unable to match mandate webhook. Customer email: ${customerEmail}`
     );
   }
 
   if (providerCustomerId) {
     throw createError(
       `Mandate not found for Paystack customer: ${providerCustomerId}`,
-      404,
+      404
     );
   }
 
   if (authorizationCode) {
-    throw createError("Mandate not found for authorization code", 404);
+    throw createError(
+      "Mandate not found for authorization code",
+      404
+    );
   }
 
   if (providerReference) {
-    throw createError(`Mandate not found: ${providerReference}`, 404);
+    throw createError(
+      `Mandate not found: ${providerReference}`,
+      404
+    );
   }
 
-  throw createError("Unable to identify mandate from webhook payload", 404);
+  throw createError(
+    "Unable to identify mandate from webhook payload",
+    404
+  );
 };
 
 // =========================================================
@@ -218,22 +267,28 @@ const buildMandateProviderUpdate = (payload) => {
     providerData: payload,
   };
 
-  const providerCustomerId = getProviderCustomerId(payload);
+  const providerCustomerId =
+    getProviderCustomerId(payload);
 
-  const authorizationCode = getAuthorizationCode(payload);
+  const authorizationCode =
+    getAuthorizationCode(payload);
 
-  const providerReference = getProviderReference(payload);
+  const providerReference =
+    getProviderReference(payload);
 
   if (providerCustomerId) {
-    update.providerCustomerId = providerCustomerId;
+    update.providerCustomerId =
+      providerCustomerId;
   }
 
   if (authorizationCode) {
-    update.authorizationCode = authorizationCode;
+    update.authorizationCode =
+      authorizationCode;
   }
 
   if (providerReference) {
-    update.authorizationReference = providerReference;
+    update.authorizationReference =
+      providerReference;
   }
 
   return update;
@@ -301,19 +356,31 @@ const getTransferId = (payload) => {
 // BUILD DISBURSEMENT PROVIDER RESULT
 // =========================================================
 
-const buildDisbursementProviderResult = (payload) => {
-  const providerReference = getDisbursementReference(payload);
-  const transferCode = getTransferCode(payload);
-  const transferId = getTransferId(payload);
+const buildDisbursementProviderResult = (
+  payload
+) => {
+  const providerReference =
+    getDisbursementReference(payload);
+
+  const transferCode =
+    getTransferCode(payload);
+
+  const transferId =
+    getTransferId(payload);
 
   return {
     provider: "paystack",
+
     reference: providerReference,
+
     transfer_code: transferCode,
+
     id: transferId,
 
     providerReference,
+
     transferCode,
+
     transferId,
 
     providerData: payload,
@@ -324,42 +391,66 @@ const buildDisbursementProviderResult = (payload) => {
 // BUILD WEBHOOK EVENT ID
 // =========================================================
 
-const buildWebhookEventId = ({ provider, eventId, eventType, payload }) => {
+const buildWebhookEventId = ({
+  provider,
+  eventId,
+  eventType,
+  payload,
+}) => {
   if (eventId) {
     return String(eventId).trim();
   }
 
-  const providerReference = getProviderReference(payload);
+  const providerReference =
+    getProviderReference(payload);
 
-  /*
-   * Paystack does not require us to invent
-   * a separate event UUID.
-   *
-   * For transfer webhooks, event type +
-   * transfer reference provides a stable
-   * idempotency key.
-   *
-   * This prevents:
-   *
-   * transfer.failed:REFERENCE
-   *
-   * from incorrectly blocking:
-   *
-   * transfer.reversed:REFERENCE
-   */
-
-  if (provider === "paystack" && providerReference) {
+  if (
+    provider === "paystack" &&
+    providerReference
+  ) {
     return `${eventType}:${providerReference}`;
   }
 
-  const providerId = payload?.id || payload?.data?.id || null;
+  const providerId =
+    payload?.id ||
+    payload?.data?.id ||
+    null;
 
   if (providerId) {
     return `${eventType}:${providerId}`;
   }
 
-  throw createError("Webhook event ID could not be determined");
+  throw createError(
+    "Webhook event ID could not be determined"
+  );
 };
+
+// =========================================================
+// SUPPORTED PAYSTACK EVENTS
+// =========================================================
+
+const supportedPaystackEvents = new Set([
+  // Payments
+  "charge.success",
+  "charge.failed",
+
+  // Direct debit / mandate
+  "direct_debit.authorization.created",
+  "direct_debit.authorization.active",
+
+  // Legacy / normalized mandate events
+  "mandate.authorized",
+  "mandate.active",
+  "mandate.failed",
+  "mandate.deactivated",
+  "mandate.cancelled",
+  "mandate.expired",
+
+  // Transfers
+  "transfer.success",
+  "transfer.failed",
+  "transfer.reversed",
+]);
 
 // =========================================================
 // PROCESS WEBHOOK
@@ -375,76 +466,88 @@ const processWebhook = async ({
   trustedInternalWebhook = false,
 }) => {
   if (!provider) {
-    throw createError("Webhook provider is required");
+    throw createError(
+      "Webhook provider is required"
+    );
   }
 
-  const normalizedProvider = String(provider).trim().toLowerCase();
+  const normalizedProvider =
+    String(provider)
+      .trim()
+      .toLowerCase();
 
-  const normalizedEventType = normalizeEventType(eventType);
+  const normalizedEventType =
+    normalizeEventType(eventType);
 
   if (!normalizedEventType) {
-    throw createError("Webhook event type is required");
+    throw createError(
+      "Webhook event type is required"
+    );
   }
 
-  // ============================================================
+  // =========================================================
   // PROVIDER VALIDATION
-  // ============================================================
+  // =========================================================
 
   if (normalizedProvider !== "paystack") {
     throw createError(
       `Unsupported webhook provider: ${normalizedProvider}`,
-      400,
+      400
     );
   }
 
-  // ============================================================
+  // =========================================================
   // PAYLOAD VALIDATION
-  // ============================================================
+  // =========================================================
 
-  if (!payload || typeof payload !== "object") {
-    throw createError("Webhook payload is required", 400);
+  if (
+    !payload ||
+    typeof payload !== "object"
+  ) {
+    throw createError(
+      "Webhook payload is required",
+      400
+    );
   }
 
-  // ============================================================
+  // =========================================================
   // SIGNATURE VALIDATION
-  //
-  // Direct Paystack webhook:
-  //   Verify x-paystack-signature here.
-  //
-  // Product -> Loan internal webhook:
-  //   Product has already verified Paystack's signature.
-  //   PaymentWebhookController has verified
-  //   x-loan-webhook-secret.
-  // ============================================================
+  // =========================================================
 
   if (!trustedInternalWebhook) {
     if (!signature) {
-      throw createError("Webhook signature is required", 401);
+      throw createError(
+        "Webhook signature is required",
+        401
+      );
     }
 
-    const valid = await verifyWebhookSignature({
-      payload: rawBody || payload,
-      signature,
-    });
+    const valid =
+      await verifyWebhookSignature({
+        payload: rawBody || payload,
+        signature,
+      });
 
     if (!valid) {
-      throw createError("Invalid webhook signature", 401);
+      throw createError(
+        "Invalid webhook signature",
+        401
+      );
     }
   }
 
-  // ============================================================
-  // SUPPORTED PAYSTACK EVENTS
-  // ============================================================
+  // =========================================================
+  // IGNORE UNSUPPORTED EVENTS
+  // =========================================================
 
-  const supportedPaystackEvents = new Set([
-    "transfer.success",
-    "transfer.failed",
-    "transfer.reversed",
-  ]);
-
-  if (!supportedPaystackEvents.has(normalizedEventType)) {
+  if (
+    normalizedProvider === "paystack" &&
+    !supportedPaystackEvents.has(
+      normalizedEventType
+    )
+  ) {
     console.log(
-      `Ignoring unsupported Paystack webhook event: ${normalizedEventType}`,
+      `Ignoring unsupported Paystack webhook event: ${normalizedEventType}`
     );
 
     return {
@@ -454,37 +557,42 @@ const processWebhook = async ({
     };
   }
 
-  // ============================================================
+  // =========================================================
   // EVENT ID
-  // ============================================================
+  // =========================================================
 
-  const normalizedEventId = buildWebhookEventId({
-    provider: normalizedProvider,
-    eventId,
-    eventType: normalizedEventType,
-    payload,
-  });
+  const normalizedEventId =
+    buildWebhookEventId({
+      provider: normalizedProvider,
+      eventId,
+      eventType: normalizedEventType,
+      payload,
+    });
 
-  // ============================================================
-  // IDEMPOTENCY
-  //
-  // Prevent the same Paystack event from processing twice.
-  // This is important because Paystack can retry webhooks.
-  // ============================================================
+  // =========================================================
+  // IDEMPOTENCY LOOKUP
+  // =========================================================
 
   let existingWebhook = null;
 
   try {
-    existingWebhook = await WebhookRepository.findByEventId(
-      normalizedProvider,
-      normalizedEventId,
-    );
+    existingWebhook =
+      await WebhookRepository.findByEventId(
+        normalizedProvider,
+        normalizedEventId
+      );
   } catch (error) {
-    console.warn("WEBHOOK IDEMPOTENCY LOOKUP WARNING:", error.message);
+    console.warn(
+      "WEBHOOK IDEMPOTENCY LOOKUP WARNING:",
+      error.message
+    );
   }
 
   if (existingWebhook) {
-    console.log("WEBHOOK ALREADY PROCESSED:", normalizedEventId);
+    console.log(
+      "WEBHOOK ALREADY PROCESSED:",
+      normalizedEventId
+    );
 
     return {
       success: true,
@@ -494,55 +602,56 @@ const processWebhook = async ({
     };
   }
 
-  // ============================================================
+  // =========================================================
   // PROVIDER DATA
-  // ============================================================
+  // =========================================================
 
-  const eventData = payload?.data || {};
+  const providerReference =
+    getProviderReference(payload);
 
-  const providerReference = getProviderReference(payload);
-
-  // ============================================================
+  // =========================================================
   // STORE WEBHOOK EVENT
-  // ============================================================
-  //
-  // This keeps a record of the incoming event before processing.
-  // Your repository may use a slightly different method signature.
-  // If your existing code already has webhook creation logic,
-  // keep that structure here.
-  // ============================================================
+  // =========================================================
 
   let webhookRecord = null;
 
   try {
-    webhookRecord = await WebhookRepository.create({
-      provider: normalizedProvider,
-      eventId: normalizedEventId,
-      eventType: normalizedEventType,
-      providerReference: providerReference || null,
-      payload,
-      rawBody: rawBody
-        ? Buffer.isBuffer(rawBody)
-          ? rawBody.toString("utf8")
-          : String(rawBody)
-        : null,
-      signature: signature || null,
-      status: "processing",
-      receivedAt: new Date(),
-    });
+    webhookRecord =
+      await WebhookRepository.create({
+        provider: normalizedProvider,
+
+        eventId: normalizedEventId,
+
+        eventType: normalizedEventType,
+
+        providerReference:
+          providerReference || null,
+
+        payload,
+
+        rawBody: rawBody
+          ? Buffer.isBuffer(rawBody)
+            ? rawBody.toString("utf8")
+            : String(rawBody)
+          : null,
+
+        signature: signature || null,
+
+        status: "processing",
+
+        receivedAt: new Date(),
+      });
   } catch (error) {
-    /*
-     * A duplicate-key error can happen if Paystack retries the
-     * exact event while another request is processing it.
-     *
-     * If your repository exposes a duplicate-key error, treat it
-     * as an idempotent duplicate instead of processing twice.
-     */
     if (
       error?.code === 11000 ||
-      /duplicate/i.test(String(error?.message || ""))
+      /duplicate/i.test(
+        String(error?.message || "")
+      )
     ) {
-      console.log("WEBHOOK DUPLICATE DETECTED:", normalizedEventId);
+      console.log(
+        "WEBHOOK DUPLICATE DETECTED:",
+        normalizedEventId
+      );
 
       return {
         success: true,
@@ -555,143 +664,21 @@ const processWebhook = async ({
     throw error;
   }
 
-  // ============================================================
-  // DISBURSEMENT PROVIDER RESULT
-  // ============================================================
-
-  const buildDisbursementProviderResult = (webhookPayload) => {
-    const reference = getDisbursementReference(webhookPayload);
-
-    const transferCode = getTransferCode(webhookPayload);
-
-    const transferId = getTransferId(webhookPayload);
-
-    return {
-      provider: "paystack",
-
-      // Exact Paystack-style fields expected by
-      // AdminDisbursementService.
-      reference,
-      transfer_code: transferCode,
-      id: transferId,
-
-      // Normalized aliases.
-      providerReference: reference,
-      transferCode,
-      transferId,
-
-      // Keep the complete Paystack event.
-      providerData: webhookPayload,
-    };
-  };
-
-  // ============================================================
-  // PROCESS SUCCESS
-  // ============================================================
-
-  const handleDisbursementSuccess = async (webhookPayload) => {
-    const reference = getDisbursementReference(webhookPayload);
-
-    if (!reference) {
-      throw createError("Missing disbursement reference");
-    }
-
-    const providerResult = buildDisbursementProviderResult(webhookPayload);
-
-    console.log("🏦 PROCESSING DISBURSEMENT SUCCESS:", reference);
-
-    console.log("TRANSFER CODE:", providerResult.transfer_code || null);
-
-    console.log("TRANSFER ID:", providerResult.id || null);
-
-    return AdminDisbursementService.markDisbursementSuccessful(
-      reference,
-      providerResult,
-    );
-  };
-
-  // ============================================================
-  // PROCESS FAILURE
-  // ============================================================
-
-  const handleDisbursementFailed = async (webhookPayload) => {
-    const reference = getDisbursementReference(webhookPayload);
-
-    if (!reference) {
-      throw createError("Missing disbursement reference");
-    }
-
-    const reason = getFailureReason(webhookPayload, "Paystack transfer failed");
-
-    const providerResult = buildDisbursementProviderResult(webhookPayload);
-
-    console.log("❌ PROCESSING DISBURSEMENT FAILURE:", reference);
-
-    console.log("FAILURE REASON:", reason);
-
-    return AdminDisbursementService.markDisbursementFailed(
-      reference,
-      providerResult,
-    );
-  };
-
-  // ============================================================
-  // PROCESS REVERSAL
-  // ============================================================
-
-  const handleDisbursementReversed = async (webhookPayload) => {
-    const reference = getDisbursementReference(webhookPayload);
-
-    if (!reference) {
-      throw createError("Missing disbursement reference");
-    }
-
-    const reason = getFailureReason(
-      webhookPayload,
-      "Paystack transfer was reversed",
-    );
-
-    const providerResult = buildDisbursementProviderResult(webhookPayload);
-
-    console.log("🔄 PROCESSING DISBURSEMENT REVERSAL:", reference);
-
-    console.log("REVERSAL REASON:", reason);
-
-    return AdminDisbursementService.markDisbursementReversed(
-      reference,
-      providerResult,
-    );
-  };
-
-  // ============================================================
+  // =========================================================
   // DISPATCH EVENT
-  // ============================================================
+  // =========================================================
 
   let result;
 
   try {
-    switch (normalizedEventType) {
-      case "transfer.success":
-        result = await handleDisbursementSuccess(payload);
-        break;
+    result = await handleEvent(
+      normalizedEventType,
+      payload
+    );
 
-      case "transfer.failed":
-        result = await handleDisbursementFailed(payload);
-        break;
-
-      case "transfer.reversed":
-        result = await handleDisbursementReversed(payload);
-        break;
-
-      default:
-        throw createError(
-          `Unsupported Paystack webhook event: ${normalizedEventType}`,
-        );
-    }
-
-    // ==========================================================
+    // =======================================================
     // MARK WEBHOOK AS PROCESSED
-    // ==========================================================
+    // =======================================================
 
     if (webhookRecord) {
       try {
@@ -700,54 +687,68 @@ const processWebhook = async ({
           normalizedEventId,
           {
             result: result || null,
-          },
+          }
         );
       } catch (error) {
-        console.error("FAILED TO MARK WEBHOOK PROCESSED:", error.message);
+        console.error(
+          "FAILED TO MARK WEBHOOK PROCESSED:",
+          error.message
+        );
       }
     }
 
-    console.log("✅ PAYMENT WEBHOOK PROCESSED:", {
-      provider: normalizedProvider,
-      eventId: normalizedEventId,
-      eventType: normalizedEventType,
-      reference: providerReference || null,
-    });
+    console.log(
+      "✅ PAYMENT WEBHOOK PROCESSED:",
+      {
+        provider: normalizedProvider,
+        eventId: normalizedEventId,
+        eventType: normalizedEventType,
+        reference:
+          providerReference || null,
+      }
+    );
 
     return {
       success: true,
       processed: true,
       eventId: normalizedEventId,
       eventType: normalizedEventType,
-      reference: providerReference || null,
+      reference:
+        providerReference || null,
       result: result || null,
     };
   } catch (error) {
-    // ==========================================================
+    // =======================================================
     // MARK WEBHOOK AS FAILED
-    // ==========================================================
+    // =======================================================
 
     if (webhookRecord) {
       try {
         await WebhookRepository.markFailed(
           normalizedProvider,
           normalizedEventId,
-          error?.message || "Webhook processing failed",
+          error?.message ||
+            "Webhook processing failed"
         );
       } catch (updateError) {
         console.error(
           "FAILED TO UPDATE WEBHOOK FAILURE STATUS:",
-          updateError.message,
+          updateError.message
         );
       }
     }
 
-    console.error("❌ PAYMENT WEBHOOK PROCESSING FAILED:", {
-      eventId: normalizedEventId,
-      eventType: normalizedEventType,
-      reference: providerReference || null,
-      error: error?.message || error,
-    });
+    console.error(
+      "❌ PAYMENT WEBHOOK PROCESSING FAILED:",
+      {
+        eventId: normalizedEventId,
+        eventType: normalizedEventType,
+        reference:
+          providerReference || null,
+        error:
+          error?.message || error,
+      }
+    );
 
     throw error;
   }
@@ -757,109 +758,126 @@ const processWebhook = async ({
 // EVENT HANDLER
 // =========================================================
 
-const handleEvent = async (eventType, payload) => {
+const handleEvent = async (
+  eventType,
+  payload
+) => {
   switch (eventType) {
     // =====================================================
     // DIRECT DEBIT / MANDATES
     // =====================================================
 
     case "direct_debit.authorization.created":
-      await handleMandateAuthorized(payload, eventType);
-      break;
+      return handleMandateAuthorized(
+        payload,
+        eventType
+      );
 
     case "direct_debit.authorization.active":
-      await handleMandateActive(payload, eventType);
-      break;
+      return handleMandateActive(
+        payload,
+        eventType
+      );
 
     case "mandate.authorized":
-      await handleMandateAuthorized(payload, eventType);
-      break;
+      return handleMandateAuthorized(
+        payload,
+        eventType
+      );
 
     case "mandate.active":
-      await handleMandateActive(payload, eventType);
-      break;
+      return handleMandateActive(
+        payload,
+        eventType
+      );
 
     case "mandate.failed":
-      await handleMandateFailed(payload, eventType);
-      break;
+      return handleMandateFailed(
+        payload,
+        eventType
+      );
 
     case "mandate.deactivated":
     case "mandate.cancelled":
-      await handleMandateCancelled(payload, eventType);
-      break;
+      return handleMandateCancelled(
+        payload,
+        eventType
+      );
 
     case "mandate.expired":
-      await handleMandateExpired(payload, eventType);
-      break;
+      return handleMandateExpired(
+        payload,
+        eventType
+      );
 
     // =====================================================
-    // REPAYMENTS
+    // PAYMENTS
     // =====================================================
 
     case "charge.success":
-      await handleChargeSuccess(payload);
-      break;
+      return handleChargeSuccess(payload);
+
+    case "charge.failed":
+      return handleChargeFailed(payload);
 
     // =====================================================
     // DISBURSEMENTS
     // =====================================================
-    //
-    // Paystack:
-    //   transfer.success
-    //   transfer.failed
-    //   transfer.reversed
-    //
-    // Generic:
-    //   disbursement.success
-    //   disbursement.failed
-    //   disbursement.reversed
-    //
-    // Both use the same handlers.
-    // =====================================================
 
     case "transfer.success":
-    case "disbursement.success":
-      await handleDisbursementSuccess(payload);
-      break;
+      return handleDisbursementSuccess(
+        payload
+      );
 
     case "transfer.failed":
-    case "disbursement.failed":
-      await handleDisbursementFailed(payload);
-      break;
+      return handleDisbursementFailed(
+        payload
+      );
 
     case "transfer.reversed":
-    case "disbursement.reversed":
-      await handleDisbursementReversed(payload);
-      break;
+      return handleDisbursementReversed(
+        payload
+      );
 
     // =====================================================
     // UNKNOWN
     // =====================================================
 
     default:
-      console.log(`Unhandled webhook event: ${eventType}`);
+      console.log(
+        `Unhandled webhook event: ${eventType}`
+      );
 
       return {
         ignored: true,
         eventType,
       };
   }
-
-  return {
-    processed: true,
-    eventType,
-  };
 };
 
 // =========================================================
 // MANDATE AUTHORIZED
 // =========================================================
 
-const handleMandateAuthorized = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateAuthorized = async (
+  payload,
+  eventType
+) => {
+  const mandate =
+    await findMandateFromPayload(
+      payload,
+      eventType
+    );
 
-  if (mandate.status === "cancelled" || mandate.status === "expired") {
-    return;
+  if (
+    mandate.status === "cancelled" ||
+    mandate.status === "expired"
+  ) {
+    return {
+      ignored: true,
+      reason: "Mandate is no longer active",
+      mandateId: mandate._id,
+    };
   }
 
   // -------------------------------------------------------
@@ -870,154 +888,429 @@ const handleMandateAuthorized = async (payload, eventType) => {
     await MandateRepository.updateById(
       mandate._id,
       mandate.user,
-      buildMandateProviderUpdate(payload),
+      buildMandateProviderUpdate(payload)
     );
 
-    return;
+    return {
+      alreadyActive: true,
+      mandateId: mandate._id,
+    };
   }
 
   // -------------------------------------------------------
   // AUTHORIZED
   // -------------------------------------------------------
 
-  await MandateRepository.updateById(mandate._id, mandate.user, {
+  await MandateRepository.updateById(
+    mandate._id,
+    mandate.user,
+    {
+      status: "authorized",
+
+      authorizedAt:
+        mandate.authorizedAt ||
+        new Date(),
+
+      ...buildMandateProviderUpdate(
+        payload
+      ),
+    }
+  );
+
+  console.log(
+    `Mandate authorized: ${mandate._id}`
+  );
+
+  return {
+    processed: true,
+    mandateId: mandate._id,
     status: "authorized",
-
-    authorizedAt: mandate.authorizedAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate authorized: ${mandate._id}`);
+  };
 };
 
 // =========================================================
 // MANDATE ACTIVE
 // =========================================================
 
-const handleMandateActive = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateActive = async (
+  payload,
+  eventType
+) => {
+  const mandate =
+    await findMandateFromPayload(
+      payload,
+      eventType
+    );
 
-  if (mandate.status === "cancelled" || mandate.status === "expired") {
-    return;
+  if (
+    mandate.status === "cancelled" ||
+    mandate.status === "expired"
+  ) {
+    return {
+      ignored: true,
+      reason: "Mandate is no longer active",
+      mandateId: mandate._id,
+    };
   }
 
-  await MandateRepository.updateById(mandate._id, mandate.user, {
+  await MandateRepository.updateById(
+    mandate._id,
+    mandate.user,
+    {
+      status: "active",
+
+      authorizedAt:
+        mandate.authorizedAt ||
+        new Date(),
+
+      activatedAt:
+        mandate.activatedAt ||
+        new Date(),
+
+      ...buildMandateProviderUpdate(
+        payload
+      ),
+    }
+  );
+
+  console.log(
+    `Mandate active: ${mandate._id}`
+  );
+
+  return {
+    processed: true,
+    mandateId: mandate._id,
     status: "active",
-
-    authorizedAt: mandate.authorizedAt || new Date(),
-
-    activatedAt: mandate.activatedAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate active: ${mandate._id}`);
+  };
 };
 
 // =========================================================
 // MANDATE FAILED
 // =========================================================
 
-const handleMandateFailed = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateFailed = async (
+  payload,
+  eventType
+) => {
+  const mandate =
+    await findMandateFromPayload(
+      payload,
+      eventType
+    );
 
   if (
     mandate.status === "cancelled" ||
     mandate.status === "expired" ||
     mandate.status === "active"
   ) {
-    return;
+    return {
+      ignored: true,
+      mandateId: mandate._id,
+      status: mandate.status,
+    };
   }
 
-  await MandateRepository.updateById(mandate._id, mandate.user, {
+  await MandateRepository.updateById(
+    mandate._id,
+    mandate.user,
+    {
+      status: "failed",
+
+      failureReason: getFailureReason(
+        payload,
+        "Provider reported mandate failure"
+      ),
+
+      failedAt:
+        mandate.failedAt ||
+        new Date(),
+
+      ...buildMandateProviderUpdate(
+        payload
+      ),
+    }
+  );
+
+  console.log(
+    `Mandate failed: ${mandate._id}`
+  );
+
+  return {
+    processed: true,
+    mandateId: mandate._id,
     status: "failed",
-
-    failureReason: getFailureReason(
-      payload,
-      "Provider reported mandate failure",
-    ),
-
-    failedAt: mandate.failedAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate failed: ${mandate._id}`);
+  };
 };
 
 // =========================================================
 // MANDATE CANCELLED
 // =========================================================
 
-const handleMandateCancelled = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateCancelled = async (
+  payload,
+  eventType
+) => {
+  const mandate =
+    await findMandateFromPayload(
+      payload,
+      eventType
+    );
 
   if (mandate.status === "cancelled") {
-    return;
+    return {
+      alreadyCancelled: true,
+      mandateId: mandate._id,
+    };
   }
 
-  await MandateRepository.updateById(mandate._id, mandate.user, {
+  await MandateRepository.updateById(
+    mandate._id,
+    mandate.user,
+    {
+      status: "cancelled",
+
+      cancelledAt:
+        mandate.cancelledAt ||
+        new Date(),
+
+      ...buildMandateProviderUpdate(
+        payload
+      ),
+    }
+  );
+
+  console.log(
+    `Mandate cancelled: ${mandate._id}`
+  );
+
+  return {
+    processed: true,
+    mandateId: mandate._id,
     status: "cancelled",
-
-    cancelledAt: mandate.cancelledAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate cancelled: ${mandate._id}`);
+  };
 };
 
 // =========================================================
 // MANDATE EXPIRED
 // =========================================================
 
-const handleMandateExpired = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateExpired = async (
+  payload,
+  eventType
+) => {
+  const mandate =
+    await findMandateFromPayload(
+      payload,
+      eventType
+    );
 
-  if (mandate.status === "cancelled" || mandate.status === "expired") {
-    return;
+  if (
+    mandate.status === "cancelled" ||
+    mandate.status === "expired"
+  ) {
+    return {
+      alreadyExpired: true,
+      mandateId: mandate._id,
+    };
   }
 
-  await MandateRepository.updateById(mandate._id, mandate.user, {
+  await MandateRepository.updateById(
+    mandate._id,
+    mandate.user,
+    {
+      status: "expired",
+
+      expiredAt:
+        mandate.expiredAt ||
+        new Date(),
+
+      ...buildMandateProviderUpdate(
+        payload
+      ),
+    }
+  );
+
+  console.log(
+    `Mandate expired: ${mandate._id}`
+  );
+
+  return {
+    processed: true,
+    mandateId: mandate._id,
     status: "expired",
-
-    expiredAt: mandate.expiredAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate expired: ${mandate._id}`);
+  };
 };
 
+
 // =========================================================
-// CHARGE SUCCESS / REPAYMENT
+// CHARGE SUCCESS
 // =========================================================
 
-const handleChargeSuccess = async (payload) => {
-  const repaymentReference = getRepaymentReference(payload);
+const handleChargeSuccess = async (
+  payload
+) => {
+  const metadata =
+    payload?.data?.metadata ||
+    payload?.metadata ||
+    {};
+
+  const providerReference =
+    payload?.data?.reference ||
+    payload?.reference ||
+    null;
+
+  // =======================================================
+  // DEDICATED VIRTUAL ACCOUNT TRANSFER
+  // =======================================================
+
+  if (
+    isDedicatedVirtualAccountCharge(
+      payload
+    )
+  ) {
+    const accountNumber =
+      getDvaReceivingAccountNumber(
+        payload
+      );
+
+    const amount =
+      payload?.data?.amount ||
+      payload?.amount ||
+      null;
+
+    if (!accountNumber) {
+      throw createError(
+        "Unable to identify receiving DVA account number"
+      );
+    }
+
+    if (!amount) {
+      throw createError(
+        "Unable to identify DVA transfer amount"
+      );
+    }
+
+    if (!providerReference) {
+      throw createError(
+        "Missing DVA transfer reference"
+      );
+    }
+
+    console.log(
+      `💰 PROCESSING DVA TRANSFER: ${providerReference} → ${accountNumber}`
+    );
+
+    const result =
+      await RepaymentAccountService
+        .creditDedicatedVirtualAccount({
+          accountNumber,
+          amount:
+            Number(amount) / 100,
+          providerReference,
+          providerData:
+            payload?.data || payload,
+        });
+
+    console.log(
+      `✅ DVA ACCOUNT CREDITED: ${providerReference}`
+    );
+
+    return {
+      processed: true,
+
+      type:
+        "repayment_account_dva_funding",
+
+      reference:
+        providerReference,
+
+      accountNumber,
+
+      result,
+    };
+  }
+
+  // =======================================================
+  // REPAYMENT ACCOUNT CHECKOUT FUNDING
+  // =======================================================
+
+  if (
+    metadata.transactionType ===
+    "repayment_account_funding"
+  ) {
+    if (!providerReference) {
+      throw createError(
+        "Missing repayment account funding reference"
+      );
+    }
+
+    console.log(
+      `💰 PROCESSING REPAYMENT ACCOUNT FUNDING: ${providerReference}`
+    );
+
+    const result =
+      await RepaymentAccountService
+        .completeFunding({
+          providerReference,
+
+          providerData:
+            payload?.data || payload,
+        });
+
+    console.log(
+      `✅ REPAYMENT ACCOUNT FUNDED: ${providerReference}`
+    );
+
+    return {
+      processed: true,
+
+      type:
+        "repayment_account_funding",
+
+      reference:
+        providerReference,
+
+      result,
+    };
+  }
+
+  // =======================================================
+  // NORMAL CUSTOMER REPAYMENT
+  // =======================================================
+
+  const repaymentReference =
+    getRepaymentReference(payload);
 
   if (!repaymentReference) {
-    throw createError("Missing repayment reference");
+    throw createError(
+      "Missing repayment reference"
+    );
   }
 
   const repayment =
-    await RepaymentRepository.findByPaymentReference(repaymentReference);
+    await RepaymentRepository
+      .findByPaymentReference(
+        repaymentReference
+      );
 
   /*
-   * Not every Paystack charge belongs to this
-   * application's repayment system.
+   * Not every Paystack charge belongs to
+   * this application's repayment system.
    */
 
   if (!repayment) {
-    console.warn(`No repayment found for charge: ` + `${repaymentReference}`);
+    console.warn(
+      `No repayment found for charge: ${repaymentReference}`
+    );
 
     return {
       ignored: true,
 
-      reason: "Repayment not found",
+      reason:
+        "Repayment not found",
 
-      reference: repaymentReference,
+      reference:
+        repaymentReference,
     };
   }
 
@@ -1025,17 +1318,27 @@ const handleChargeSuccess = async (payload) => {
   // IDEMPOTENT
   // -------------------------------------------------------
 
-  if (repayment.status === "successful") {
+  if (
+    repayment.status ===
+    "successful"
+  ) {
     return {
       alreadyProcessed: true,
-      repaymentId: repayment._id,
+
+      repaymentId:
+        repayment._id,
     };
   }
 
-  if (repayment.status === "reversed") {
+  if (
+    repayment.status ===
+    "reversed"
+  ) {
     return {
       alreadyReversed: true,
-      repaymentId: repayment._id,
+
+      repaymentId:
+        repayment._id,
     };
   }
 
@@ -1043,81 +1346,282 @@ const handleChargeSuccess = async (payload) => {
   // SETTLE REPAYMENT
   // -------------------------------------------------------
 
-  const result = await RepaymentService.processSuccessfulRepayment(
-    repayment._id,
-    {
-      ...payload,
+  const result =
+    await RepaymentService
+      .processSuccessfulRepayment(
+        repayment._id,
+        {
+          ...payload,
 
-      provider: "paystack",
+          provider:
+            "paystack",
 
-      providerReference:
-        payload?.id ||
-        payload?.transaction_id ||
-        payload?.data?.id ||
-        payload?.data?.transaction_id ||
-        repaymentReference,
-    },
+          providerReference:
+            payload?.data?.id ||
+            payload?.data
+              ?.transaction_id ||
+            payload?.id ||
+            payload
+              ?.transaction_id ||
+            repaymentReference,
+        }
+      );
+
+  console.log(
+    `Repayment successfully processed: ${repaymentReference}`
   );
 
-  console.log(`Repayment successfully processed: ` + `${repaymentReference}`);
-
   return result;
+};
+
+
+
+// =========================================================
+// CHARGE FAILED
+// =========================================================
+
+const handleChargeFailed = async (
+  payload
+) => {
+  const metadata =
+    payload?.data?.metadata ||
+    payload?.metadata ||
+    {};
+
+  // -------------------------------------------------------
+  // REPAYMENT ACCOUNT FUNDING FAILURE
+  // -------------------------------------------------------
+
+  if (
+    metadata.transactionType ===
+    "repayment_account_funding"
+  ) {
+    const providerReference =
+      payload?.data?.reference ||
+      payload?.reference ||
+      null;
+
+    console.warn(
+      `❌ REPAYMENT ACCOUNT FUNDING FAILED: ${providerReference}`
+    );
+
+    return {
+      processed: true,
+      type: "repayment_account_funding",
+      status: "failed",
+      reference: providerReference,
+      reason: getFailureReason(
+        payload,
+        "Repayment account funding failed"
+      ),
+    };
+  }
+
+  // -------------------------------------------------------
+  // NORMAL REPAYMENT FAILURE
+  // -------------------------------------------------------
+
+  const repaymentReference =
+    getRepaymentReference(payload);
+
+  if (!repaymentReference) {
+    return {
+      ignored: true,
+      reason: "Missing repayment reference",
+    };
+  }
+
+  const repayment =
+    await RepaymentRepository.findByPaymentReference(
+      repaymentReference
+    );
+
+  if (!repayment) {
+    return {
+      ignored: true,
+      reason: "Repayment not found",
+      reference: repaymentReference,
+    };
+  }
+
+  if (
+    repayment.status === "successful" ||
+    repayment.status === "reversed"
+  ) {
+    return {
+      alreadyFinalized: true,
+      repaymentId: repayment._id,
+      status: repayment.status,
+    };
+  }
+
+  const failureReason =
+    getFailureReason(
+      payload,
+      "Paystack charge failed"
+    );
+
+  const updated =
+    await RepaymentRepository.updateById(
+      repayment._id,
+      {
+        status: "failed",
+        failureReason,
+        provider: "paystack",
+        providerReference:
+          payload?.data?.id ||
+          payload?.data?.transaction_id ||
+          repayment.providerReference ||
+          repaymentReference,
+        providerData: payload,
+      }
+    );
+
+  return {
+    processed: true,
+    repaymentId: repayment._id,
+    status: "failed",
+    failureReason,
+    repayment: updated,
+  };
 };
 
 // =========================================================
 // DISBURSEMENT SUCCESS
 // =========================================================
 
-const handleDisbursementSuccess = async (payload) => {
-  const providerReference = getDisbursementReference(payload);
+const handleDisbursementSuccess = async (
+  payload
+) => {
+  const providerReference =
+    getDisbursementReference(payload);
 
   if (!providerReference) {
-    throw createError("Missing disbursement reference");
+    throw createError(
+      "Missing disbursement reference"
+    );
   }
 
-  const providerResult = buildDisbursementProviderResult(payload);
+  const providerResult =
+    buildDisbursementProviderResult(
+      payload
+    );
 
-  console.log(`Processing disbursement success: ${providerReference}`);
+  console.log(
+    `Processing disbursement success: ${providerReference}`
+  );
 
-  return AdminDisbursementService.markDisbursementSuccessful(
-    providerReference,
-    providerResult,
+  return AdminDisbursementService
+    .markDisbursementSuccessful(
+      providerReference,
+      providerResult
+    );
+};
+
+// =========================================================
+// DISBURSEMENT FAILED
+// =========================================================
+
+const handleDisbursementFailed = async (
+  payload
+) => {
+  const providerReference =
+    getDisbursementReference(payload);
+
+  if (!providerReference) {
+    throw createError(
+      "Missing disbursement reference"
+    );
+  }
+
+  const providerResult =
+    buildDisbursementProviderResult(
+      payload
+    );
+
+  console.log(
+    `Processing disbursement failure: ${providerReference}`
+  );
+
+  return AdminDisbursementService
+    .markDisbursementFailed(
+      providerReference,
+      providerResult
+    );
+};
+
+// =========================================================
+// DISBURSEMENT REVERSED
+// =========================================================
+
+const handleDisbursementReversed = async (
+  payload
+) => {
+  const providerReference =
+    getDisbursementReference(payload);
+
+  if (!providerReference) {
+    throw createError(
+      "Missing disbursement reference"
+    );
+  }
+
+  const providerResult =
+    buildDisbursementProviderResult(
+      payload
+    );
+
+  console.log(
+    `Processing disbursement reversal: ${providerReference}`
+  );
+
+  return AdminDisbursementService
+    .markDisbursementReversed(
+      providerReference,
+      providerResult
+    );
+};
+
+
+// =========================================================
+// EXTRACT DVA RECEIVING ACCOUNT NUMBER
+// =========================================================
+
+const getDvaReceivingAccountNumber = (payload) => {
+  return (
+    payload?.data?.authorization
+      ?.receiver_bank_account_number ||
+    payload?.authorization
+      ?.receiver_bank_account_number ||
+    payload?.data?.receiver_bank_account_number ||
+    payload?.receiver_bank_account_number ||
+    payload?.data?.account_number ||
+    payload?.account_number ||
+    null
   );
 };
 
-const handleDisbursementFailed = async (payload) => {
-  const providerReference = getDisbursementReference(payload);
+// =========================================================
+// DETECT DVA CHARGE
+// =========================================================
 
-  if (!providerReference) {
-    throw createError("Missing disbursement reference");
-  }
+const isDedicatedVirtualAccountCharge = (
+  payload
+) => {
+  const authorization =
+    payload?.data?.authorization ||
+    payload?.authorization ||
+    {};
 
-  const providerResult = buildDisbursementProviderResult(payload);
-
-  console.log(`Processing disbursement failure: ${providerReference}`);
-
-  return AdminDisbursementService.markDisbursementFailed(
-    providerReference,
-    providerResult,
+  return (
+    authorization?.channel ===
+      "dedicated_nuban" ||
+    authorization?.card_type === "transfer" &&
+      !!authorization?.receiver_bank_account_number
   );
 };
 
-const handleDisbursementReversed = async (payload) => {
-  const providerReference = getDisbursementReference(payload);
 
-  if (!providerReference) {
-    throw createError("Missing disbursement reference");
-  }
-
-  const providerResult = buildDisbursementProviderResult(payload);
-
-  console.log(`Processing disbursement reversal: ${providerReference}`);
-
-  return AdminDisbursementService.markDisbursementReversed(
-    providerReference,
-    providerResult,
-  );
-};
 
 // =========================================================
 // EXPORT
@@ -1125,4 +1629,6 @@ const handleDisbursementReversed = async (payload) => {
 
 module.exports = {
   processWebhook,
+  getDvaReceivingAccountNumber,
 };
+

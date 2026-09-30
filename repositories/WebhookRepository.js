@@ -1,3 +1,4 @@
+
 const WebhookEvent = require(
   "../model/WebhookEventModel"
 );
@@ -64,7 +65,7 @@ const markProcessing = async (
       },
     },
     {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     }
   );
@@ -100,7 +101,7 @@ const markProcessed = async (
       },
     },
     {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     }
   );
@@ -134,7 +135,7 @@ const markFailed = async (
       },
     },
     {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     }
   );

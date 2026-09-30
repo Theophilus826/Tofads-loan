@@ -585,6 +585,90 @@ const verifyWebhookSignature = ({
   }
 };
 
+const validateCustomerIdentity = async ({
+  customerCode,
+  firstName,
+  lastName,
+  bvn,
+  accountNumber,
+  bankCode,
+}) => {
+  if (!customerCode) {
+    throw new Error(
+      "Paystack customer code is required",
+    );
+  }
+
+  if (!firstName) {
+    throw new Error(
+      "Customer first name is required",
+    );
+  }
+
+  if (!lastName) {
+    throw new Error(
+      "Customer last name is required",
+    );
+  }
+
+  if (!/^\d{11}$/.test(String(bvn || ""))) {
+    throw new Error(
+      "BVN must contain exactly 11 digits",
+    );
+  }
+
+  if (
+    !/^\d{10}$/.test(
+      String(accountNumber || ""),
+    )
+  ) {
+    throw new Error(
+      "Bank account number must contain exactly 10 digits",
+    );
+  }
+
+  if (!bankCode) {
+    throw new Error(
+      "Bank code is required",
+    );
+  }
+
+  try {
+    const response = await paystack.post(
+      `/customer/${encodeURIComponent(
+        customerCode,
+      )}/identification`,
+      {
+        country: "NG",
+        type: "bank_account",
+
+        account_number:
+          String(accountNumber),
+
+        bvn: String(bvn),
+
+        bank_code:
+          String(bankCode),
+
+        first_name:
+          String(firstName).trim(),
+
+        last_name:
+          String(lastName).trim(),
+      },
+    );
+
+    return (
+      response.data?.data ||
+      response.data
+    );
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Unable to start customer identity verification",
+    );
+  }
+};
 // =========================================================
 // CREATE / GET PAYSTACK CUSTOMER
 // =========================================================
@@ -723,6 +807,129 @@ error,
 );
 }
 };
+
+// =========================================================
+// CREATE DEDICATED VIRTUAL ACCOUNT
+// =========================================================
+//
+// Creates a Paystack Dedicated Virtual Account for an
+// existing Paystack customer.
+//
+// The customer must already exist.
+// We do NOT create a new Paystack customer here.
+//
+// =========================================================
+
+const createDedicatedVirtualAccount = async ({
+  customerCode,
+  preferredBank,
+  phone,
+  firstName,
+  lastName,
+  email,
+  metadata = {},
+}) => {
+  if (!customerCode) {
+    throw new Error(
+      "Paystack customer code is required",
+    );
+  }
+
+  try {
+    const payload = {
+      customer:
+        customerCode,
+
+      ...(preferredBank && {
+        preferred_bank:
+          preferredBank,
+      }),
+
+      ...(phone && {
+        phone,
+      }),
+
+      ...(firstName && {
+        first_name:
+          firstName,
+      }),
+
+      ...(lastName && {
+        last_name:
+          lastName,
+      }),
+
+      ...(email && {
+        email,
+      }),
+
+      ...(Object.keys(metadata).length > 0 && {
+        metadata,
+      }),
+    };
+
+    const response =
+      await paystack.post(
+        "/dedicated_account",
+        payload,
+      );
+
+    const data =
+      response.data?.data;
+
+    if (!data) {
+      throw new Error(
+        "Paystack dedicated virtual account was not created",
+      );
+    }
+
+    if (!data.account_number) {
+      throw new Error(
+        "Paystack did not return a dedicated account number",
+      );
+    }
+
+    return {
+      provider:
+        "paystack",
+
+      providerAccountId:
+        data.id || null,
+
+      accountNumber:
+        data.account_number,
+
+      accountName:
+        data.account_name ||
+        null,
+
+      bankName:
+        data.bank?.name ||
+        null,
+
+      bankCode:
+        data.bank?.code ||
+        null,
+
+      currency:
+        data.currency ||
+        "NGN",
+
+      customerCode:
+        data.customer?.customer_code ||
+        customerCode,
+
+      providerData:
+        data,
+    };
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Unable to create Paystack dedicated virtual account",
+    );
+  }
+};
+
 
 // =========================================================
 // INITIALIZE PAYMENT
@@ -1601,7 +1808,7 @@ getPaystackBanks,
 listBanks,
 
 verifyWebhookSignature,
-
+validateCustomerIdentity,
 initializePayment,
 verifyTransaction,
 chargeAuthorization,
@@ -1615,4 +1822,5 @@ cancelMandate,
 triggerActivationCharge,
 getCustomerMandates,
 createOrGetCustomer,
+createDedicatedVirtualAccount,
 };

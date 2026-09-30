@@ -10,6 +10,12 @@ require("../repositories/RepaymentRepository");
 const LoanRepository =
 require("../repositories/LoanRepository");
 
+const RepaymentAccountRepository =
+  require("../repositories/RepaymentAccountRepository");
+
+const RepaymentAccountTransactionRepository =
+  require("../repositories/RepaymentAccountTransactionRepository");
+
 const PaymentProvider =
 require("../config/PaymentProvider");
 
@@ -759,46 +765,61 @@ await session.withTransaction(
     const repayment =
       await RepaymentRepository.create(
         {
-          user: userId,
+  user: userId,
 
-          loan: loan._id,
+  loan: loan._id,
 
-          loanApplication:
-            loanApplicationId,
+  loanApplication:
+    loanApplicationId,
 
-          repaymentSchedule:
-            schedule._id,
+  repaymentSchedule:
+    schedule._id,
 
-          paymentReference:
-            generatePaymentReference(),
+  paymentReference:
+    generatePaymentReference(),
 
-          amount:
-            repaymentAmount,
+  amount:
+    repaymentAmount,
 
-          currency:
-            schedule.currency ||
-            "NGN",
+  currency:
+    schedule.currency ||
+    "NGN",
 
-          paymentMethod,
+  paymentMethod,
 
-          provider:
-            provider || null,
+  repaymentSource:
+    "customer_payment",
 
-          providerReference:
-            providerReference ||
-            null,
+  repaymentAccount:
+    null,
 
-          status: "processing",
+  mandate:
+    null,
 
-          providerData:
-            providerData || null,
+  initiatedBy:
+    userId,
 
-          allocatedAmount: 0,
+  initiatedByRole:
+    "customer",
 
-          unallocatedAmount: 0,
+  provider:
+    provider || null,
 
-          allocation: [],
-        },
+  providerReference:
+    providerReference || null,
+
+  status:
+    "processing",
+
+  providerData:
+    providerData || null,
+
+  allocatedAmount: 0,
+
+  unallocatedAmount: 0,
+
+  allocation: [],
+},
         {
           session,
         }
@@ -864,213 +885,307 @@ await session.endSession();
 // =========================================================
 
 const initiateRepayment = async (
-userId,
-{
-repaymentScheduleId,
-amount,
-paymentMethod,
-email,
-}
-) => {
-const paymentAmount =
-roundMoney(amount);
-
-if (
-!Number.isFinite(
-paymentAmount
-) ||
-paymentAmount <= 0
-) {
-throw createError(
-"Invalid repayment amount",
-400
-);
-}
-
-validatePaymentMethod(
-paymentMethod
-);
-
-const schedule =
-await getCustomerSchedule(
-repaymentScheduleId,
-userId
-);
-
-const outstanding =
-validateScheduleForPayment(
-schedule
-);
-
-if (
-paymentAmount > outstanding
-) {
-throw createError(
-`Payment cannot exceed outstanding balance of ${outstanding}`,
-400
-);
-}
-
-const loan =
-await getLoanForSchedule(
-schedule
-);
-
-validateLoanForPayment(
-loan
-);
-
-const paymentReference =
-generatePaymentReference();
-
-const loanApplicationId =
-schedule.loanApplication?._id ||
-schedule.loanApplication;
-
-if (!loanApplicationId) {
-throw createError(
-"Loan application is missing from repayment schedule",
-400
-);
-}
-
-// -------------------------------------------------------
-// CREATE PENDING REPAYMENT
-// -------------------------------------------------------
-
-const repayment =
-await RepaymentRepository.create({
-user: userId,
-
-
-  loan: loan._id,
-
-  loanApplication:
-    loanApplicationId,
-
-  repaymentSchedule:
-    schedule._id,
-
-  paymentReference,
-
-  amount:
-    paymentAmount,
-
-  currency:
-    schedule.currency ||
-    "NGN",
-
-  paymentMethod,
-
-  provider: null,
-
-  providerReference: null,
-
-  status: "pending",
-
-  providerData: null,
-
-  allocatedAmount: 0,
-
-  unallocatedAmount: 0,
-
-  allocation: [],
-});
-
-
-// -------------------------------------------------------
-// INITIALIZE PROVIDER
-// -------------------------------------------------------
-
-try {
-const providerResponse =
-await PaymentProvider.initializePayment({
-reference:
-paymentReference,
-
-
-    amount:
-      paymentAmount,
-
-    currency:
-      schedule.currency ||
-      "NGN",
-
+  userId,
+  {
+    repaymentScheduleId,
+    amount,
+    paymentMethod,
     email,
+  }
+) => {
+  // =======================================================
+  // VALIDATE AMOUNT
+  // =======================================================
 
-    metadata: {
-      repaymentId:
-        repayment._id.toString(),
+  const paymentAmount = roundMoney(amount);
 
-      repaymentScheduleId:
-        schedule._id.toString(),
+  if (
+    !Number.isFinite(paymentAmount) ||
+    paymentAmount <= 0
+  ) {
+    throw createError(
+      "Invalid repayment amount",
+      400
+    );
+  }
 
-      loanApplicationId:
-        loanApplicationId.toString(),
+  // =======================================================
+  // VALIDATE PAYMENT METHOD
+  // =======================================================
 
-      loanId:
-        loan._id.toString(),
+  validatePaymentMethod(paymentMethod);
 
-      userId:
-        userId.toString(),
-    },
-  });
+  // =======================================================
+  // GET CUSTOMER SCHEDULE
+  // =======================================================
 
-const updated =
-  await RepaymentRepository.updateById(
-    repayment._id,
-    {
-      status: "processing",
+  const schedule = await getCustomerSchedule(
+    repaymentScheduleId,
+    userId
+  );
+
+  const outstanding =
+    validateScheduleForPayment(schedule);
+
+  if (paymentAmount > outstanding) {
+    throw createError(
+      `Payment cannot exceed the outstanding balance of ${outstanding}`,
+      400
+    );
+  }
+
+  // =======================================================
+  // GET LOAN
+  // =======================================================
+
+  const loan = await getLoanForSchedule(
+    schedule
+  );
+
+  validateLoanForPayment(loan);
+
+  // =======================================================
+  // LOAN APPLICATION
+  // =======================================================
+
+  const loanApplicationId =
+    schedule.loanApplication?._id ||
+    schedule.loanApplication;
+
+  if (!loanApplicationId) {
+    throw createError(
+      "Loan application is missing from repayment schedule",
+      400
+    );
+  }
+
+  // =======================================================
+  // PAYMENT REFERENCE
+  // =======================================================
+
+  const paymentReference =
+    generatePaymentReference();
+
+  // =======================================================
+  // CREATE PENDING REPAYMENT
+  // =======================================================
+  //
+  // This is a CUSTOMER payment.
+  //
+  // It is NOT:
+  // - repayment account
+  // - mandate debit
+  //
+  // The repayment remains pending until the
+  // verified payment-provider webhook confirms it.
+  // =======================================================
+
+  const repayment =
+    await RepaymentRepository.create({
+      user: userId,
+
+      loan: loan._id,
+
+      loanApplication:
+        loanApplicationId,
+
+      repaymentSchedule:
+        schedule._id,
+
+      paymentReference,
+
+      amount:
+        paymentAmount,
+
+      currency:
+        schedule.currency ||
+        "NGN",
+
+      paymentMethod,
+
+      // ---------------------------------------------------
+      // REPAYMENT SOURCE
+      // ---------------------------------------------------
+
+      repaymentSource:
+        "customer_payment",
+
+      // ---------------------------------------------------
+      // NOT A REPAYMENT ACCOUNT PAYMENT
+      // ---------------------------------------------------
+
+      repaymentAccount:
+        null,
+
+      // ---------------------------------------------------
+      // NOT A MANDATE PAYMENT
+      // ---------------------------------------------------
+
+      mandate:
+        null,
+
+      // ---------------------------------------------------
+      // INITIATOR
+      // ---------------------------------------------------
+
+      initiatedBy:
+        userId,
+
+      initiatedByRole:
+        "customer",
+
+      // ---------------------------------------------------
+      // PROVIDER
+      // ---------------------------------------------------
 
       provider:
-        providerResponse.provider ||
         null,
 
       providerReference:
-        providerResponse.reference ||
         null,
 
       providerData:
-        providerResponse,
+        null,
+
+      // ---------------------------------------------------
+      // PAYMENT STATUS
+      // ---------------------------------------------------
+
+      status:
+        "pending",
+
+      failureReason:
+        null,
+
+      // ---------------------------------------------------
+      // ALLOCATION
+      // ---------------------------------------------------
+
+      allocatedAmount:
+        0,
+
+      unallocatedAmount:
+        0,
+
+      allocation: [],
+    });
+
+  // =======================================================
+  // INITIALIZE PAYMENT PROVIDER
+  // =======================================================
+
+  try {
+    const providerResponse =
+      await PaymentProvider.initializePayment({
+        reference:
+          paymentReference,
+
+        amount:
+          paymentAmount,
+
+        currency:
+          schedule.currency ||
+          "NGN",
+
+        email,
+
+        metadata: {
+          repaymentId:
+            repayment._id.toString(),
+
+          repaymentScheduleId:
+            schedule._id.toString(),
+
+          loanApplicationId:
+            loanApplicationId.toString(),
+
+          loanId:
+            loan._id.toString(),
+
+          userId:
+            userId.toString(),
+
+          repaymentSource:
+            "customer_payment",
+        },
+      });
+
+    // =====================================================
+    // VALIDATE PROVIDER RESPONSE
+    // =====================================================
+
+    if (
+      !providerResponse ||
+      !providerResponse.reference
+    ) {
+      throw createError(
+        "Payment provider returned an invalid response",
+        502
+      );
     }
-  );
 
-return {
-  repayment: updated,
+    // =====================================================
+    // UPDATE REPAYMENT
+    // =====================================================
 
-  payment: {
-    reference:
-      paymentReference,
+    const updated =
+      await RepaymentRepository.updateById(
+        repayment._id,
+        {
+          status:
+            "processing",
 
-    authorizationUrl:
-      providerResponse
-        .authorizationUrl ||
-      null,
+          provider:
+            providerResponse.provider ||
+            null,
 
-    accessCode:
-      providerResponse.accessCode ||
-      null,
-  },
-};
+          providerReference:
+            providerResponse.reference,
 
+          providerData:
+            providerResponse,
+        }
+      );
 
-} catch (error) {
-await RepaymentRepository.updateById(
-repayment._id,
-{
-status: "failed",
+    // =====================================================
+    // RESPONSE
+    // =====================================================
 
+    return {
+      repayment: updated,
 
-    failureReason:
-      error.message ||
-      "Payment initialization failed",
+      payment: {
+        reference:
+          paymentReference,
+
+        authorizationUrl:
+          providerResponse.authorizationUrl ||
+          null,
+
+        accessCode:
+          providerResponse.accessCode ||
+          null,
+      },
+    };
+  } catch (error) {
+    // =====================================================
+    // MARK PAYMENT AS FAILED
+    // =====================================================
+
+    await RepaymentRepository.updateById(
+      repayment._id,
+      {
+        status:
+          "failed",
+
+        failureReason:
+          error.message ||
+          "Payment initialization failed",
+      }
+    );
+
+    throw error;
   }
-);
-
-throw error;
-
-
-}
 };
 
 // =========================================================
@@ -1299,253 +1414,859 @@ try {
 // PROCESS AUTO-DEBIT REPAYMENT
 // =========================================================
 
-const processAutoDebitRepayment =
-async ({
-debit,
-payload = {},
+const processAutoDebitRepayment = async ({
+  debit,
+  payload = {},
 }) => {
-if (!debit) {
-throw createError(
-"Debit is required",
-400
-);
-}
+  // =======================================================
+  // VALIDATE DEBIT
+  // =======================================================
 
+  if (!debit) {
+    throw createError(
+      "Debit is required",
+      400
+    );
+  }
 
-if (
-  !debit.repaymentSchedule
-) {
-  throw createError(
-    "Repayment schedule is required",
-    400
-  );
-}
+  if (!debit.repaymentSchedule) {
+    throw createError(
+      "Repayment schedule is required",
+      400
+    );
+  }
 
-if (!debit.user) {
-  throw createError(
-    "Debit user is required",
-    400
-  );
-}
+  if (!debit.user) {
+    throw createError(
+      "Debit user is required",
+      400
+    );
+  }
 
-const paymentAmount =
-  roundMoney(
+  if (!debit.mandate) {
+    throw createError(
+      "Mandate is required for auto-debit repayment",
+      400
+    );
+  }
+
+  // =======================================================
+  // VALIDATE AMOUNT
+  // =======================================================
+
+  const paymentAmount = roundMoney(
     Number(debit.amount)
   );
 
-if (
-  !Number.isFinite(
-    paymentAmount
-  ) ||
-  paymentAmount <= 0
-) {
-  throw createError(
-    "Invalid auto-debit amount",
-    400
-  );
-}
+  if (
+    !Number.isFinite(paymentAmount) ||
+    paymentAmount <= 0
+  ) {
+    throw createError(
+      "Invalid auto-debit amount",
+      400
+    );
+  }
 
-const schedule =
-  await RepaymentScheduleRepository
-    .findById(
+  // =======================================================
+  // GET CUSTOMER SCHEDULE
+  // =======================================================
+
+  const schedule =
+    await RepaymentScheduleRepository.findById(
       debit.repaymentSchedule,
       debit.user
     );
 
-if (!schedule) {
-  throw createError(
-    "Repayment schedule not found",
-    404
-  );
-}
+  if (!schedule) {
+    throw createError(
+      "Repayment schedule not found",
+      404
+    );
+  }
 
-const outstanding =
-  validateScheduleForPayment(
-    schedule
-  );
+  const outstanding =
+    validateScheduleForPayment(
+      schedule
+    );
 
-if (
-  paymentAmount > outstanding
-) {
-  throw createError(
-    "Auto-debit amount exceeds outstanding balance",
-    400
-  );
-}
+  if (paymentAmount > outstanding) {
+    throw createError(
+      `Auto-debit amount cannot exceed the outstanding balance of ${outstanding}`,
+      400
+    );
+  }
 
-const loan =
-  await getLoanForSchedule(
-    schedule
-  );
+  // =======================================================
+  // GET LOAN
+  // =======================================================
 
-validateLoanForPayment(
-  loan
-);
+  const loan =
+    await getLoanForSchedule(
+      schedule
+    );
 
-const providerReference =
-  debit.providerReference ||
-  debit.reference ||
-  null;
+  validateLoanForPayment(loan);
 
-// -------------------------------------------------------
-// PROVIDER IDEMPOTENCY
-// -------------------------------------------------------
+  // =======================================================
+  // LOAN APPLICATION
+  // =======================================================
 
-if (providerReference) {
-  const existing =
-    await RepaymentRepository
-      .findByProviderReference(
+  const loanApplicationId =
+    schedule.loanApplication?._id ||
+    schedule.loanApplication;
+
+  if (!loanApplicationId) {
+    throw createError(
+      "Loan application is missing from repayment schedule",
+      400
+    );
+  }
+
+  // =======================================================
+  // PROVIDER REFERENCE
+  // =======================================================
+
+  const providerReference =
+    debit.providerReference ||
+    debit.reference ||
+    null;
+
+  // =======================================================
+  // PROVIDER IDEMPOTENCY
+  // =======================================================
+
+  if (providerReference) {
+    const existing =
+      await RepaymentRepository.findByProviderReference(
         providerReference
       );
 
-  if (existing) {
-    return existing;
+    if (existing) {
+      return existing;
+    }
   }
-}
 
-const loanApplicationId =
-  schedule.loanApplication?._id ||
-  schedule.loanApplication;
+  // =======================================================
+  // TRANSACTION
+  // =======================================================
 
-if (!loanApplicationId) {
-  throw createError(
-    "Loan application is missing from repayment schedule",
-    400
-  );
-}
+  const session =
+    await mongoose.startSession();
 
-// -------------------------------------------------------
-// TRANSACTION
-// -------------------------------------------------------
+  try {
+    let result;
+    let repaymentId;
 
-const session =
-  await mongoose.startSession();
+    await session.withTransaction(
+      async () => {
+        // =================================================
+        // GET MANDATE INSIDE TRANSACTION
+        // =================================================
 
-try {
-  let result;
-  let repaymentId;
+        const Mandate =
+          mongoose.model("Mandate");
 
-  await session.withTransaction(
-    async () => {
-      const repayment =
-        await RepaymentRepository.create(
-          {
-            user: debit.user,
+        const mandate =
+          await Mandate.findById(
+            debit.mandate
+          ).session(session);
 
-            loan: loan._id,
+        if (!mandate) {
+          throw createError(
+            "Mandate not found",
+            404
+          );
+        }
 
-            loanApplication:
-              loanApplicationId,
+        // =================================================
+        // VALIDATE MANDATE OWNER
+        // =================================================
 
-            repaymentSchedule:
-              schedule._id,
+        if (
+          String(mandate.user) !==
+          String(debit.user)
+        ) {
+          throw createError(
+            "Mandate does not belong to this customer",
+            403
+          );
+        }
 
-            paymentReference:
-              generatePaymentReference(),
+        // =================================================
+        // VALIDATE MANDATE STATUS
+        // =================================================
 
-            amount:
-              paymentAmount,
+        if (
+          mandate.status !==
+          "active"
+        ) {
+          throw createError(
+            "Mandate is not active",
+            400
+          );
+        }
 
-            currency:
-              schedule.currency ||
-              "NGN",
+        // =================================================
+        // VALIDATE AUTHORIZATION
+        // =================================================
 
-            paymentMethod:
-              "direct_debit",
+        if (
+          !mandate.authorizationCode
+        ) {
+          throw createError(
+            "Mandate does not have a reusable authorization",
+            400
+          );
+        }
 
-            provider:
-              debit.provider ||
-              null,
+        // =================================================
+        // VALIDATE MANDATE LOAN
+        // =================================================
 
-            providerReference,
+        if (
+          mandate.loan &&
+          String(mandate.loan) !==
+            String(loan._id)
+        ) {
+          throw createError(
+            "Mandate does not belong to this loan",
+            409
+          );
+        }
 
-            providerData:
-              payload || null,
+        // =================================================
+        // VALIDATE MANDATE LOAN APPLICATION
+        // =================================================
 
-            status:
-              "processing",
+        if (
+          mandate.loanApplication &&
+          String(
+            mandate.loanApplication
+          ) !==
+            String(loanApplicationId)
+        ) {
+          throw createError(
+            "Mandate does not belong to this loan application",
+            409
+          );
+        }
 
-            allocatedAmount: 0,
+        // =================================================
+        // CHECK MANDATE EXPIRATION
+        // =================================================
 
-            unallocatedAmount: 0,
+        const now = new Date();
 
-            allocation: [],
-          },
-          {
-            session,
-          }
-        );
+        if (
+          mandate.endDate &&
+          new Date(mandate.endDate) < now
+        ) {
+          throw createError(
+            "Mandate has expired",
+            400
+          );
+        }
 
-      repaymentId =
-        repayment._id;
+        // =================================================
+        // CREATE REPAYMENT
+        // =================================================
 
-      const internalSchedule =
-        await RepaymentScheduleRepository
-          .findByIdInternal(
+        const repayment =
+          await RepaymentRepository.create(
+            {
+              user:
+                debit.user,
+
+              loan:
+                loan._id,
+
+              loanApplication:
+                loanApplicationId,
+
+              repaymentSchedule:
+                schedule._id,
+
+              paymentReference:
+                generatePaymentReference(),
+
+              amount:
+                paymentAmount,
+
+              currency:
+                schedule.currency ||
+                "NGN",
+
+              paymentMethod:
+                "direct_debit",
+
+              // -------------------------------------------
+              // REPAYMENT SOURCE
+              // -------------------------------------------
+
+              repaymentSource:
+                "mandate",
+
+              // -------------------------------------------
+              // REPAYMENT ACCOUNT
+              // -------------------------------------------
+
+              repaymentAccount:
+                null,
+
+              // -------------------------------------------
+              // MANDATE
+              // -------------------------------------------
+
+              mandate:
+                mandate._id,
+
+              // -------------------------------------------
+              // INITIATOR
+              // -------------------------------------------
+
+              initiatedBy:
+                debit.initiatedBy ||
+                null,
+
+              initiatedByRole:
+                debit.initiatedByRole ||
+                "system",
+
+              // -------------------------------------------
+              // PROVIDER
+              // -------------------------------------------
+
+              provider:
+                debit.provider ||
+                "paystack",
+
+              providerReference,
+
+              providerData:
+                payload || null,
+
+              // -------------------------------------------
+              // STATUS
+              // -------------------------------------------
+
+              status:
+                "processing",
+
+              failureReason:
+                null,
+
+              // -------------------------------------------
+              // ALLOCATION
+              // -------------------------------------------
+
+              allocatedAmount:
+                0,
+
+              unallocatedAmount:
+                0,
+
+              allocation: [],
+            },
+            {
+              session,
+            }
+          );
+
+        repaymentId =
+          repayment._id;
+
+        // =================================================
+        // RELOAD EXACT SCHEDULE
+        // =================================================
+
+        const internalSchedule =
+          await RepaymentScheduleRepository.findByIdInternal(
             repayment.repaymentSchedule,
             session
           );
 
-      if (!internalSchedule) {
-        throw createError(
-          "Repayment schedule not found",
-          404
-        );
-      }
+        if (!internalSchedule) {
+          throw createError(
+            "Repayment schedule not found",
+            404
+          );
+        }
 
-      const internalLoan =
-        await getLoanForSchedule(
-          internalSchedule,
-          session
-        );
+        // =================================================
+        // VERIFY SCHEDULE OWNER
+        // =================================================
 
-      result =
-        await applySuccessfulRepayment({
-          repayment,
+        if (
+          String(
+            internalSchedule.user
+          ) !==
+          String(debit.user)
+        ) {
+          throw createError(
+            "Repayment schedule does not belong to customer",
+            403
+          );
+        }
 
-          schedule:
+        // =================================================
+        // GET INTERNAL LOAN
+        // =================================================
+
+        const internalLoan =
+          await getLoanForSchedule(
             internalSchedule,
+            session
+          );
 
-          loan:
-            internalLoan,
+        // =================================================
+        // VERIFY LOAN
+        // =================================================
 
-          providerData:
-            payload,
+        if (
+          String(internalLoan._id) !==
+          String(loan._id)
+        ) {
+          throw createError(
+            "Repayment loan does not match repayment schedule",
+            409
+          );
+        }
 
-          provider:
-            debit.provider ||
-            null,
+        validateLoanForPayment(
+          internalLoan
+        );
 
-          providerReference,
+        // =================================================
+        // APPLY REPAYMENT
+        // =================================================
+        //
+        // This performs:
+        //
+        // - installment allocation
+        // - schedule balance update
+        // - loan balance update
+        // - repayment completion
+        //
+        // =================================================
 
-          session,
-        });
+        result =
+          await applySuccessfulRepayment({
+            repayment,
+
+            schedule:
+              internalSchedule,
+
+            loan:
+              internalLoan,
+
+            providerData:
+              payload,
+
+            provider:
+              debit.provider ||
+              "paystack",
+
+            providerReference,
+
+            session,
+          });
+      }
+    );
+
+    // =====================================================
+    // LINK DEBIT RECORD
+    // =====================================================
+
+    if (
+      debit._id &&
+      typeof debit.save ===
+        "function"
+    ) {
+      debit.repayment =
+        repaymentId;
+
+      debit.status =
+        "successful";
+
+      await debit.save();
     }
-  );
 
-  // -----------------------------------------------------
-  // LINK DEBIT RECORD
-  // -----------------------------------------------------
+    return result;
+  } finally {
+    await session.endSession();
+  }
+};
+
+// =========================================================
+// REPAY FROM REPAYMENT ACCOUNT
+// =========================================================
+//
+// Customer uses money that has already been credited
+// to their reusable repayment account.
+//
+// NO PAYSTACK WEBHOOK IS REQUIRED.
+//
+// Account debit + repayment + ledger + schedule + loan
+// update happen in one MongoDB transaction.
+// =========================================================
+
+const repayFromAccount = async (
+  userId,
+  {
+    repaymentScheduleId,
+    amount,
+  }
+) => {
+  const repaymentAmount = roundMoney(amount);
+
+  // -------------------------------------------------------
+  // VALIDATE AMOUNT
+  // -------------------------------------------------------
 
   if (
-    debit._id &&
-    typeof debit.save ===
-      "function"
+    !Number.isFinite(repaymentAmount) ||
+    repaymentAmount <= 0
   ) {
-    debit.repayment =
-      repaymentId;
-
-    debit.status =
-      "successful";
-
-    await debit.save();
+    throw createError(
+      "Repayment amount must be greater than zero",
+      400
+    );
   }
 
-  return result;
-} finally {
-  await session.endSession();
-}
+  // -------------------------------------------------------
+  // GET CUSTOMER SCHEDULE
+  // -------------------------------------------------------
 
+  const schedule =
+    await getCustomerSchedule(
+      repaymentScheduleId,
+      userId
+    );
+
+  const outstanding =
+    validateScheduleForPayment(
+      schedule
+    );
+
+  if (
+    repaymentAmount > outstanding
+  ) {
+    throw createError(
+      `Repayment cannot exceed the outstanding balance of ${outstanding}`,
+      400
+    );
+  }
+
+  // -------------------------------------------------------
+  // GET LOAN
+  // -------------------------------------------------------
+
+  const loan =
+    await getLoanForSchedule(
+      schedule
+    );
+
+  validateLoanForPayment(loan);
+
+  // -------------------------------------------------------
+  // LOAN APPLICATION
+  // -------------------------------------------------------
+
+  const loanApplicationId =
+    schedule.loanApplication?._id ||
+    schedule.loanApplication;
+
+  if (!loanApplicationId) {
+    throw createError(
+      "Loan application is missing from repayment schedule",
+      400
+    );
+  }
+
+  // -------------------------------------------------------
+  // TRANSACTION
+  // -------------------------------------------------------
+
+  const session =
+    await mongoose.startSession();
+
+  try {
+    let result;
+
+    await session.withTransaction(
+      async () => {
+        // -------------------------------------------------
+        // GET ACTIVE REPAYMENT ACCOUNT
+        // -------------------------------------------------
+
+        const account =
+          await RepaymentAccountRepository
+            .findActiveByUser(
+              userId,
+              session
+            );
+
+        if (!account) {
+          throw createError(
+            "Active repayment account not found",
+            404
+          );
+        }
+
+        // -------------------------------------------------
+        // ATOMIC ACCOUNT DEBIT
+        // -------------------------------------------------
+        //
+        // The repository checks:
+        //
+        // balance >= repaymentAmount
+        //
+        // as part of the update itself.
+        //
+        // This prevents concurrent repayment requests
+        // from spending the same balance.
+        // -------------------------------------------------
+
+        const balanceBefore =
+          roundMoney(
+            account.balance
+          );
+
+        const updatedAccount =
+          await RepaymentAccountRepository.debit(
+            account._id,
+            userId,
+            repaymentAmount,
+            {
+              session,
+            }
+          );
+
+        if (!updatedAccount) {
+          throw createError(
+            "Insufficient repayment account balance",
+            400
+          );
+        }
+
+        // -------------------------------------------------
+        // CREATE REPAYMENT
+        // -------------------------------------------------
+
+        const repayment =
+          await RepaymentRepository.create(
+            {
+              user: userId,
+
+              loan: loan._id,
+
+              loanApplication:
+                loanApplicationId,
+
+              repaymentSchedule:
+                schedule._id,
+
+              paymentReference:
+                generatePaymentReference(),
+
+              amount:
+                repaymentAmount,
+
+              currency:
+                account.currency ||
+                schedule.currency ||
+                "NGN",
+
+              paymentMethod:
+                "wallet",
+
+              repaymentSource:
+                "repayment_account",
+
+              repaymentAccount:
+                account._id,
+
+              mandate: null,
+
+              initiatedBy:
+                userId,
+
+              initiatedByRole:
+                "customer",
+
+              provider:
+                "internal",
+
+              providerReference:
+                null,
+
+              status:
+                "processing",
+
+              providerData:
+                null,
+
+              allocatedAmount: 0,
+
+              unallocatedAmount: 0,
+
+              allocation: [],
+            },
+            {
+              session,
+            }
+          );
+
+        // -------------------------------------------------
+        // CREATE ACCOUNT LEDGER
+        // -------------------------------------------------
+
+        await RepaymentAccountTransactionRepository
+          .create(
+            {
+              repaymentAccount:
+                account._id,
+
+              user: userId,
+
+              type: "debit",
+
+              amount:
+                repaymentAmount,
+
+              currency:
+                account.currency ||
+                schedule.currency ||
+                "NGN",
+
+              balanceBefore,
+
+              balanceAfter:
+                roundMoney(
+                  updatedAccount.balance
+                ),
+
+              purpose:
+                "loan_repayment",
+
+              loan:
+                loan._id,
+
+              loanApplication:
+                loanApplicationId,
+
+              repaymentSchedule:
+                schedule._id,
+
+              repayment:
+                repayment._id,
+
+              provider:
+                "internal",
+
+              providerReference:
+                repayment.paymentReference,
+
+              providerData:
+                null,
+
+              description:
+                `Loan repayment from repayment account - ${repayment.paymentReference}`,
+
+              initiatedBy:
+                userId,
+
+              initiatedByRole:
+                "customer",
+            },
+            {
+              session,
+            }
+          );
+
+        // -------------------------------------------------
+        // RELOAD EXACT RECORDS INSIDE TRANSACTION
+        // -------------------------------------------------
+
+        const internalSchedule =
+          await RepaymentScheduleRepository
+            .findByIdInternal(
+              repayment.repaymentSchedule,
+              session
+            );
+
+        if (!internalSchedule) {
+          throw createError(
+            "Repayment schedule not found",
+            404
+          );
+        }
+
+        const internalLoan =
+          await getLoanForSchedule(
+            internalSchedule,
+            session
+          );
+
+        // -------------------------------------------------
+        // APPLY REPAYMENT
+        // -------------------------------------------------
+        //
+        // Reuse your existing allocation engine.
+        // This updates:
+        //
+        // schedule installments
+        // schedule amountPaid
+        // schedule amountOutstanding
+        // loan amountPaid
+        // loan outstandingAmount
+        // repayment allocation
+        // repayment status
+        //
+        // -------------------------------------------------
+
+        result =
+          await applySuccessfulRepayment({
+            repayment,
+
+            schedule:
+              internalSchedule,
+
+            loan:
+              internalLoan,
+
+            providerData: {
+              source:
+                "repayment_account",
+
+              repaymentAccount:
+                account._id.toString(),
+
+              paymentReference:
+                repayment.paymentReference,
+            },
+
+            provider:
+              "internal",
+
+            providerReference:
+              repayment.paymentReference,
+
+            session,
+          });
+      }
+    );
+
+    return {
+      ...result,
+
+      repaymentSource:
+        "repayment_account",
+    };
+  } finally {
+    await session.endSession();
+  }
 };
 
 // =========================================================
@@ -1555,6 +2276,7 @@ try {
 module.exports = {
 initiateRepayment,
 makeRepayment,
+repayFromAccount,
 processSuccessfulRepayment,
 processAutoDebitRepayment,
 };
