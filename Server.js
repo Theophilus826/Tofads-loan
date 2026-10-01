@@ -1,4 +1,3 @@
-
 // ==========================
 // LOAD ENVIRONMENT VARIABLES
 // ==========================
@@ -128,10 +127,7 @@ const startServer = async () => {
         console.log("🔥 PAYMENT WEBHOOK REQUEST RECEIVED");
         console.log("METHOD:", req.method);
         console.log("URL:", req.originalUrl);
-        console.log(
-          "CONTENT-TYPE:",
-          req.headers["content-type"] || null,
-        );
+        console.log("CONTENT-TYPE:", req.headers["content-type"] || null);
         console.log(
           "PAYSTACK SIGNATURE PRESENT:",
           !!req.headers["x-paystack-signature"],
@@ -179,7 +175,13 @@ const startServer = async () => {
     // ==========================
 
     app.use("/api/kyc", KycRoutes);
-
+    console.log("=================================");
+    console.log("🪪 KYC ROUTES MOUNTED");
+    console.log(" POST /api/kyc/webhook/paystack");
+    console.log(" POST /api/kyc/webhook/face");
+    console.log(" POST /api/kyc/bvn/verify");
+    console.log(" POST /api/kyc/face/verify");
+    console.log("=================================");
     // ==========================
     // ONBOARDING
     // ==========================
@@ -326,37 +328,25 @@ const startServer = async () => {
     // ADMIN LOAN PRODUCTS
     // ==========================
 
-    app.use(
-      "/api/admin/loan-products",
-      adminLoanProductRoutes,
-    );
+    app.use("/api/admin/loan-products", adminLoanProductRoutes);
 
     // ==========================
     // ADMIN BORROWERS
     // ==========================
 
-    app.use(
-      "/api/admin/borrowers",
-      adminBorrowerRoutes,
-    );
+    app.use("/api/admin/borrowers", adminBorrowerRoutes);
 
     // ==========================
     // ADMIN DISBURSEMENTS
     // ==========================
 
-    app.use(
-      "/api/admin/disbursements",
-      AdminDisbursementRoutes,
-    );
+    app.use("/api/admin/disbursements", AdminDisbursementRoutes);
 
     // ==========================
     // NOTIFICATIONS
     // ==========================
 
-    app.use(
-      "/api/notifications",
-      NotificationRoutes,
-    );
+    app.use("/api/notifications", NotificationRoutes);
 
     // ==========================
     // ERROR HANDLER
@@ -386,9 +376,7 @@ const startServer = async () => {
       console.log("   GET  /api/repayment-account/balance");
       console.log("   POST /api/repayment-account/fund");
       console.log("   GET  /api/repayment-account/transactions");
-      console.log(
-        "   GET  /api/repayment-account/transactions/:transactionId",
-      );
+      console.log("   GET  /api/repayment-account/transactions/:transactionId");
       console.log("=================================");
     });
   } catch (error) {
@@ -403,4 +391,3 @@ const startServer = async () => {
 // RUN SERVER
 // ==========================
 startServer();
-
