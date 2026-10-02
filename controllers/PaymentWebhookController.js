@@ -1,4 +1,3 @@
-
 const crypto = require("crypto");
 
 const PaymentWebhookService = require("../services/PaymentWebhookService");
@@ -52,7 +51,10 @@ const safeCompare = (a, b) => {
 // PAYSTACK SIGNATURE
 // =========================================================
 
-const verifyPaystackSignature = (rawBody, signature) => {
+const verifyPaystackSignature = (
+  rawBody,
+  signature
+) => {
   const secret =
     process.env.PAYSTACK_SECRET_KEY ||
     process.env.PAYSTACK_SECRET;
@@ -115,20 +117,38 @@ const verifyInternalLoanWebhook = (secret) => {
 // =========================================================
 
 const supportedPaystackEvents = new Set([
-  // Customer payments
+  // -------------------------------------------------------
+  // DEDICATED VIRTUAL ACCOUNTS
+  // -------------------------------------------------------
+
+  "dedicatedaccount.assign.success",
+   "dedicatedaccount.assign.failed",
+  // -------------------------------------------------------
+  // CUSTOMER PAYMENTS
+  // -------------------------------------------------------
+
   "charge.success",
   "charge.failed",
 
-  // Transfers
+  // -------------------------------------------------------
+  // TRANSFERS
+  // -------------------------------------------------------
+
   "transfer.success",
   "transfer.failed",
   "transfer.reversed",
 
-  // Some integrations may forward these
+  // -------------------------------------------------------
+  // OTHER PAYMENT EVENTS
+  // -------------------------------------------------------
+
   "payment.success",
   "payment.failed",
 
-  // Auto-debit / recurring debit events
+  // -------------------------------------------------------
+  // AUTO-DEBIT / RECURRING
+  // -------------------------------------------------------
+
   "subscription.create",
   "invoice.create",
   "invoice.payment_failed",
@@ -136,18 +156,115 @@ const supportedPaystackEvents = new Set([
 ]);
 
 // =========================================================
+// INTERNAL EVENTS
+// =========================================================
+
+const internalSupportedEvents = new Set([
+  // Loan transfers
+  "transfer.success",
+  "transfer.failed",
+  "transfer.reversed",
+
+  // Loan DVA assignment
+  "dedicatedaccount.assign.success",
+  "dedicatedaccount.assign.failed",
+]);
+
+// =========================================================
+// EVENT ID
+// =========================================================
+
+const getWebhookEventId = ({
+  req,
+  payload,
+  eventType,
+  eventData,
+}) => {
+  const headerEventId =
+    getHeader(
+      req,
+      "x-webhook-event-id"
+    );
+
+  if (headerEventId) {
+    return String(headerEventId).trim();
+  }
+
+  /*
+   * Paystack does not necessarily provide the same
+   * top-level identifier for every webhook type.
+   *
+   * Prefer provider reference/id where available.
+   */
+  const candidates = [
+    eventData?.reference,
+    eventData?.id,
+    eventData?.customer?.id,
+    payload?.reference,
+    payload?.id,
+  ];
+
+  for (const candidate of candidates) {
+    if (
+      candidate !== undefined &&
+      candidate !== null &&
+      String(candidate).trim()
+    ) {
+      return String(candidate).trim();
+    }
+  }
+
+  /*
+   * DVA assignment events may not contain a payment
+   * reference. PaymentWebhookService should therefore
+   * also have its own idempotency protection based on
+   * the provider account/customer information.
+   */
+  if (
+    eventType ===
+    "dedicatedaccount.assign.success"
+  ) {
+    const customerCode =
+      eventData?.customer?.customer_code ||
+      eventData?.customer_code ||
+      null;
+
+    const accountNumber =
+      eventData?.account_number ||
+      null;
+
+    if (customerCode || accountNumber) {
+      return [
+        "dva-assignment",
+        customerCode || "unknown-customer",
+        accountNumber || "pending-account",
+      ].join(":");
+    }
+  }
+
+  return null;
+};
+
+// =========================================================
 // PAYMENT WEBHOOK
 // POST /api/webhooks/webhook
 // =========================================================
 
-const handleWebhook = async (req, res, next) => {
+const handleWebhook = async (
+  req,
+  res,
+  next
+) => {
   try {
     // -----------------------------------------------------
     // PROVIDER
     // -----------------------------------------------------
 
     const provider = String(
-      getHeader(req, "x-payment-provider") ||
+      getHeader(
+        req,
+        "x-payment-provider"
+      ) ||
         process.env.PAYMENT_PROVIDER ||
         "paystack"
     )
@@ -164,10 +281,11 @@ const handleWebhook = async (req, res, next) => {
     // INTERNAL PRODUCT → LOAN AUTHENTICATION
     // -----------------------------------------------------
 
-    const internalLoanSecret = getHeader(
-      req,
-      "x-loan-webhook-secret"
-    );
+    const internalLoanSecret =
+      getHeader(
+        req,
+        "x-loan-webhook-secret"
+      );
 
     const isInternalLoanWebhook =
       !!internalLoanSecret &&
@@ -179,15 +297,17 @@ const handleWebhook = async (req, res, next) => {
     // PAYSTACK SIGNATURE
     // -----------------------------------------------------
 
-    const paystackSignature = getHeader(
-      req,
-      "x-paystack-signature"
-    );
+    const paystackSignature =
+      getHeader(
+        req,
+        "x-paystack-signature"
+      );
 
-    const genericSignature = getHeader(
-      req,
-      "x-webhook-signature"
-    );
+    const genericSignature =
+      getHeader(
+        req,
+        "x-webhook-signature"
+      );
 
     const signature =
       paystackSignature ||
@@ -205,7 +325,10 @@ const handleWebhook = async (req, res, next) => {
     // -----------------------------------------------------
 
     const eventType = String(
-      getHeader(req, "x-webhook-event-type") ||
+      getHeader(
+        req,
+        "x-webhook-event-type"
+      ) ||
         payload.event ||
         ""
     )
@@ -215,7 +338,8 @@ const handleWebhook = async (req, res, next) => {
     if (!eventType) {
       return res.status(400).json({
         success: false,
-        message: "Webhook event type is required",
+        message:
+          "Webhook event type is required",
       });
     }
 
@@ -223,18 +347,14 @@ const handleWebhook = async (req, res, next) => {
     // EVENT DATA
     // -----------------------------------------------------
 
-    const eventData = payload?.data || {};
+    const eventData =
+      payload?.data || {};
 
     // -----------------------------------------------------
     // INTERNAL PRODUCT → LOAN REQUEST
     // -----------------------------------------------------
 
     if (isInternalLoanWebhook) {
-      /*
-       * Only allow the Product backend to forward
-       * Paystack transfer events to this endpoint.
-       */
-
       if (provider !== "paystack") {
         return res.status(400).json({
           success: false,
@@ -243,14 +363,10 @@ const handleWebhook = async (req, res, next) => {
         });
       }
 
-      const internalSupportedEvents = new Set([
-        "transfer.success",
-        "transfer.failed",
-        "transfer.reversed",
-      ]);
-
       if (
-        !internalSupportedEvents.has(eventType)
+        !internalSupportedEvents.has(
+          eventType
+        )
       ) {
         return res.status(200).json({
           success: true,
@@ -261,7 +377,7 @@ const handleWebhook = async (req, res, next) => {
       }
 
       console.log(
-        "✅ AUTHENTICATED PRODUCT → LOAN WEBHOOK:",
+        "AUTHENTICATED PRODUCT → LOAN WEBHOOK:",
         eventType
       );
     } else {
@@ -294,7 +410,7 @@ const handleWebhook = async (req, res, next) => {
 
         if (!validSignature) {
           console.warn(
-            "❌ INVALID PAYSTACK WEBHOOK SIGNATURE"
+            "INVALID PAYSTACK WEBHOOK SIGNATURE"
           );
 
           return res.status(401).json({
@@ -305,22 +421,11 @@ const handleWebhook = async (req, res, next) => {
         }
 
         console.log(
-          "✅ DIRECT PAYSTACK WEBHOOK AUTHENTICATED:",
+          "DIRECT PAYSTACK WEBHOOK AUTHENTICATED:",
           eventType
         );
       }
     }
-
-    // -----------------------------------------------------
-    // EVENT ID / REFERENCE
-    // -----------------------------------------------------
-
-    const eventId =
-      getHeader(req, "x-webhook-event-id") ||
-      eventData?.reference ||
-      payload?.reference ||
-      payload?.id ||
-      null;
 
     // -----------------------------------------------------
     // IGNORE UNSUPPORTED PAYSTACK EVENTS
@@ -328,7 +433,9 @@ const handleWebhook = async (req, res, next) => {
 
     if (
       provider === "paystack" &&
-      !supportedPaystackEvents.has(eventType)
+      !supportedPaystackEvents.has(
+        eventType
+      )
     ) {
       console.log(
         `Ignoring unsupported Paystack webhook event: ${eventType}`
@@ -343,19 +450,113 @@ const handleWebhook = async (req, res, next) => {
     }
 
     // -----------------------------------------------------
+    // EVENT ID
+    // -----------------------------------------------------
+
+    const eventId =
+      getWebhookEventId({
+        req,
+        payload,
+        eventType,
+        eventData,
+      });
+
+    // -----------------------------------------------------
+    // LOG DVA ASSIGNMENT
+    // -----------------------------------------------------
+
+    if (
+      eventType ===
+      "dedicatedaccount.assign.success"
+    ) {
+      console.log(
+        "PAYSTACK DVA ASSIGNMENT SUCCESS:",
+        {
+          customerCode:
+            eventData?.customer
+              ?.customer_code ||
+            eventData?.customer_code ||
+            null,
+
+          accountNumber:
+            eventData?.account_number ||
+            null,
+
+          accountName:
+            eventData?.account_name ||
+            null,
+
+          bankName:
+            eventData?.bank?.name ||
+            null,
+
+          bankCode:
+            eventData?.bank?.code ||
+            null,
+
+          providerAccountId:
+            eventData?.id ||
+            null,
+        }
+      );
+    }
+
+    // -----------------------------------------------------
+    // LOG DVA FUNDING
+    // -----------------------------------------------------
+
+    if (
+      eventType === "charge.success" &&
+      eventData?.authorization
+        ?.channel === "dedicated_nuban"
+    ) {
+      console.log(
+        "PAYSTACK DVA PAYMENT RECEIVED:",
+        {
+          reference:
+            eventData?.reference ||
+            null,
+
+          amount:
+            eventData?.amount ||
+            null,
+
+          currency:
+            eventData?.currency ||
+            null,
+
+          accountNumber:
+            eventData?.authorization
+              ?.receiver_bank_account_number ||
+            eventData
+              ?.authorization
+              ?.account_number ||
+            null,
+        }
+      );
+    }
+
+    // -----------------------------------------------------
     // PROCESS WEBHOOK
     // -----------------------------------------------------
 
     const result =
       await PaymentWebhookService.processWebhook({
         provider,
-        eventId: eventId
-          ? String(eventId).trim()
-          : null,
+
+        eventId:
+          eventId
+            ? String(eventId).trim()
+            : null,
+
         eventType,
+
         payload,
+
         rawBody,
+
         signature,
+
         trustedInternalWebhook:
           isInternalLoanWebhook,
       });
@@ -367,10 +568,14 @@ const handleWebhook = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       received: true,
-      eventId: eventId
-        ? String(eventId).trim()
-        : null,
+
+      eventId:
+        eventId
+          ? String(eventId).trim()
+          : null,
+
       eventType,
+
       result: result || null,
     });
   } catch (error) {

@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const repaymentAccountSchema = new mongoose.Schema(
@@ -38,6 +37,12 @@ const repaymentAccountSchema = new mongoose.Schema(
       default: null,
     },
 
+    bankCode: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
     currency: {
       type: String,
       default: "NGN",
@@ -60,13 +65,6 @@ const repaymentAccountSchema = new mongoose.Schema(
     // =====================================================
     // ACCOUNT TOTALS
     // =====================================================
-    //
-    // totalCredited:
-    // Total money successfully funded into the account.
-    //
-    // totalRepaid:
-    // Total money successfully used for loan repayments.
-    //
 
     totalCredited: {
       type: Number,
@@ -83,7 +81,7 @@ const repaymentAccountSchema = new mongoose.Schema(
     },
 
     // =====================================================
-    // STATUS
+    // ACCOUNT STATUS
     // =====================================================
 
     status: {
@@ -116,6 +114,35 @@ const repaymentAccountSchema = new mongoose.Schema(
     },
 
     // =====================================================
+    // PAYSTACK DVA STATUS
+    // =====================================================
+    //
+    // This is separate from the local account status.
+    //
+    // pending:
+    // Paystack assignment has been requested but the
+    // dedicated account details have not arrived yet.
+    //
+    // active:
+    // Paystack has successfully assigned the DVA.
+    //
+    // failed:
+    // DVA assignment failed.
+    //
+
+    dvaStatus: {
+      type: String,
+      enum: [
+        "pending",
+        "active",
+        "failed",
+      ],
+      default: "pending",
+      required: true,
+      index: true,
+    },
+
+    // =====================================================
     // PROVIDER CUSTOMER
     // =====================================================
     //
@@ -132,7 +159,7 @@ const repaymentAccountSchema = new mongoose.Schema(
     // PROVIDER ACCOUNT
     // =====================================================
     //
-    // Provider-side dedicated account ID, if applicable.
+    // Paystack dedicated virtual account ID.
     //
 
     providerAccountId: {
@@ -171,15 +198,48 @@ repaymentAccountSchema.index({
   status: 1,
 });
 
-// Provider customer lookup
+// DVA lookup by status
 repaymentAccountSchema.index({
-  providerCustomerCode: 1,
+  provider: 1,
+  dvaStatus: 1,
 });
 
-// Provider account lookup
-repaymentAccountSchema.index({
-  providerAccountId: 1,
-});
+// =========================================================
+// PAYSTACK DVA INDEXES
+// =========================================================
+
+// One repayment account per Paystack customer code
+//
+// sparse: true allows accounts without a customer code.
+//
+// The provider is included so the same customer code could
+// theoretically exist under another payment provider.
+
+repaymentAccountSchema.index(
+  {
+    provider: 1,
+    providerCustomerCode: 1,
+  },
+  {
+    unique: true,
+    sparse: true,
+  }
+);
+
+// One repayment account per provider-side DVA ID
+repaymentAccountSchema.index(
+  {
+    provider: 1,
+    providerAccountId: 1,
+  },
+  {
+    unique: true,
+    sparse: true,
+  }
+);
+
+// accountNumber already has unique + sparse above.
+// No duplicate index is needed here.
 
 // =========================================================
 // VIRTUALS
@@ -188,8 +248,7 @@ repaymentAccountSchema.index({
 repaymentAccountSchema.virtual("availableBalance").get(
   function () {
     return Number(this.balance || 0);
-  }
-);
+});
 
 // =========================================================
 // METHODS
@@ -214,6 +273,17 @@ repaymentAccountSchema.methods.hasSufficientBalance =
 repaymentAccountSchema.methods.isActive =
   function () {
     return this.status === "active";
+  };
+
+repaymentAccountSchema.methods.hasActiveDva =
+  function () {
+    return (
+      this.provider === "paystack" &&
+      this.dvaStatus === "active" &&
+      !!this.accountNumber &&
+      !!this.providerAccountId &&
+      !!this.providerCustomerCode
+    );
   };
 
 // =========================================================

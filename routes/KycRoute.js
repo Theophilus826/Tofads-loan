@@ -1,7 +1,11 @@
-
 const express = require("express");
 
 const KycController = require("../controllers/KycController");
+
+const RepaymentAccountBackfillController = require(
+  "../controllers/RepaymentAccountBackfillController"
+);
+
 const {
   protect,
   admin,
@@ -30,7 +34,7 @@ const router = express.Router();
 
 router.post(
   "/webhook/paystack",
-  KycController.paystackKycWebhook
+  KycController.paystackKycWebhook,
 );
 
 /* =========================================================
@@ -43,38 +47,11 @@ router.post(
 router.get(
   "/me",
   protect,
-  KycController.getMyKyc
+  KycController.getMyKyc,
 );
 
 /**
  * Submit / update KYC
- *
- * Expected multipart/form-data fields:
- *
- * Text fields:
- * - firstName
- * - lastName
- * - dateOfBirth
- * - gender
- * - address
- * - city
- * - state
- * - country
- * - idType
- * - idNumber
- *
- * Optional:
- * - bvn
- *
- * Files:
- * - idDocumentFront
- * - selfie
- *
- * There is intentionally NO idDocumentBack field.
- *
- * BVN is stored separately from the uploaded identity
- * documents and can also be submitted through the
- * dedicated BVN verification endpoint below.
  */
 router.post(
   "/",
@@ -89,7 +66,7 @@ router.post(
       maxCount: 1,
     },
   ]),
-  KycController.submitKyc
+  KycController.submitKyc,
 );
 
 /* =========================================================
@@ -98,67 +75,31 @@ router.post(
 
 /**
  * Start BVN / customer identity verification
- *
- * Expected JSON body:
- *
- * {
- *   "bvn": "12345678901",
- *   "bankAccountId": "optional-bank-account-id"
- * }
- *
- * If bankAccountId is omitted, the user's primary
- * verified bank account is used.
- *
- * The BVN is verified through Paystack using:
- * - customer identity information
- * - BVN
- * - bank account number
- * - bank code
- *
- * The full BVN is never returned to the client.
  */
 router.post(
   "/bvn/verify",
   protect,
-  KycController.startBvnVerification
+  KycController.startBvnVerification,
 );
 
 /**
- * Get the current KYC / BVN / face verification status
- *
- * Returns public verification status information
- * without exposing the stored BVN or other sensitive
- * verification data.
+ * Get current KYC / BVN / selfie verification status
  */
 router.get(
   "/verification-status",
   protect,
-  KycController.getVerificationStatus
+  KycController.getVerificationStatus,
 );
 
 /* =========================================================
-   CUSTOMER FACE VERIFICATION
+   CUSTOMER SELFIE
    ========================================================= */
 
-/**
- * Start face verification
- *
- * Expected JSON body:
- *
- * {
- *   "selfie": "data:image/jpeg;base64,..."
- * }
- *
- * Face verification is the final identity verification
- * step after KYC, BVN and Paystack customer verification.
- *
- * The actual Smile Identity integration is handled by
- * KycService / SmileIdentityProvider.
- */
 router.post(
   "/face/verify",
   protect,
-  KycController.startFaceVerification
+  upload.single("selfie"),
+  KycController.startFaceVerification,
 );
 
 /* =========================================================
@@ -167,62 +108,42 @@ router.post(
 
 /**
  * Get ALL KYC records
- *
- * Includes:
- * - pending
- * - submitted
- * - under_review
- * - verified
- * - rejected
- *
- * This allows the admin to continue viewing KYC
- * records after verification or rejection.
  */
 router.get(
   "/admin",
   protect,
   admin,
-  KycController.getAllKyc
+  KycController.getAllKyc,
 );
 
 /**
  * Get a SINGLE KYC record by ID
- *
- * Used when an admin opens a specific KYC record
- * from the dashboard or review history.
  */
 router.get(
   "/admin/:id",
   protect,
   admin,
-  KycController.getKycById
+  KycController.getKycById,
 );
 
 /**
  * Get pending/submitted KYC records
- *
- * This is the admin review queue.
  */
 router.get(
   "/admin/pending",
   protect,
   admin,
-  KycController.getPendingKyc
+  KycController.getPendingKyc,
 );
 
 /**
  * Verify KYC
- *
- * This is the admin/document verification step.
- *
- * It remains separate from Paystack BVN/customer
- * identity verification.
  */
 router.patch(
   "/admin/:id/verify",
   protect,
   admin,
-  KycController.verifyKyc
+  KycController.verifyKyc,
 );
 
 /**
@@ -232,13 +153,42 @@ router.patch(
   "/admin/:id/reject",
   protect,
   admin,
-  KycController.rejectKyc
+  KycController.rejectKyc,
 );
 
+/* =========================================================
+   ADMIN REPAYMENT ACCOUNT BACKFILL
+   =========================================================
+
+   Provisions Paystack repayment DVAs for borrowers who
+   were successfully disbursed before the repayment-account
+   system was introduced.
+
+   Only borrowers with:
+
+       Disbursement.status === "successful"
+
+   are processed.
+
+   Existing active/pending DVAs are skipped safely.
+
+   Expected endpoint:
+
+   POST /api/kyc/admin/repayment-accounts/provision-existing
+
+   Query parameters:
+
+   ?page=1&limit=100
+   ========================================================= */
+
 router.post(
-  "/webhook/face",
-  KycController.faceVerificationWebhook
+  "/admin/repayment-accounts/provision-existing",
+  protect,
+  admin,
+  RepaymentAccountBackfillController
+    .provisionExistingDisbursedBorrowers,
 );
+
 /* =========================================================
    EXPORT
    ========================================================= */

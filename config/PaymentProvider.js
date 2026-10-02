@@ -5,23 +5,19 @@ const crypto = require("crypto");
 // PAYSTACK CONFIG
 // =========================================================
 
-const PAYSTACK_SECRET_KEY =
-process.env.PAYSTACK_SECRET_KEY;
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 
 const PAYSTACK_BASE_URL =
-process.env.PAYSTACK_BASE_URL ||
-"https://api.paystack.co";
+  process.env.PAYSTACK_BASE_URL || "https://api.paystack.co";
 
 // =========================================================
 // VALIDATE CONFIG
 // =========================================================
 
 const requirePaystackKey = () => {
-if (!PAYSTACK_SECRET_KEY) {
-throw new Error(
-"PAYSTACK_SECRET_KEY is not configured"
-);
-}
+  if (!PAYSTACK_SECRET_KEY) {
+    throw new Error("PAYSTACK_SECRET_KEY is not configured");
+  }
 };
 
 // =========================================================
@@ -35,90 +31,61 @@ throw new Error(
 // =========================================================
 
 const toKobo = (amount) => {
-const numericAmount = Number(amount);
+  const numericAmount = Number(amount);
 
-if (
-!Number.isFinite(numericAmount) ||
-numericAmount <= 0
-) {
-throw new Error(
-"Amount must be greater than zero"
-);
-}
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    throw new Error("Amount must be greater than zero");
+  }
 
-return Math.round(
-numericAmount * 100
-);
+  return Math.round(numericAmount * 100);
 };
 
 const fromKobo = (amount) => {
-const numericAmount = Number(amount);
+  const numericAmount = Number(amount);
 
-if (!Number.isFinite(numericAmount)) {
-return null;
-}
+  if (!Number.isFinite(numericAmount)) {
+    return null;
+  }
 
-return numericAmount / 100;
+  return numericAmount / 100;
 };
 
 // =========================================================
 // PAYSTACK ERROR NORMALIZATION
 // =========================================================
 
-const normalizePaystackError = (
-error,
-fallbackMessage
-) => {
-if (
-error?.response?.data?.message
-) {
-const normalized = new Error(
-error.response.data.message
-);
+const normalizePaystackError = (error, fallbackMessage) => {
+  if (error?.response?.data?.message) {
+    const normalized = new Error(error.response.data.message);
 
+    normalized.statusCode =
+      error.response.status >= 400 && error.response.status < 500
+        ? error.response.status
+        : 502;
 
-normalized.statusCode =
-  error.response.status >= 400 &&
-  error.response.status < 500
-    ? error.response.status
-    : 502;
+    normalized.provider = "paystack";
 
-normalized.provider =
-  "paystack";
+    normalized.providerData = error.response.data;
 
-normalized.providerData =
-  error.response.data;
+    return normalized;
+  }
 
-return normalized;
+  if (error?.message) {
+    const normalized = new Error(error.message);
 
+    normalized.statusCode = error.statusCode || 502;
 
-}
+    normalized.provider = "paystack";
 
-if (error?.message) {
-const normalized = new Error(
-error.message
-);
+    return normalized;
+  }
 
+  const normalized = new Error(fallbackMessage);
 
-normalized.statusCode =
-  error.statusCode || 502;
+  normalized.statusCode = 502;
+  normalized.provider = "paystack";
 
-normalized.provider =
-  "paystack";
-
-return normalized;
-
-
-}
-
-const normalized = new Error(
-fallbackMessage
-);
-
-normalized.statusCode = 502;
-normalized.provider = "paystack";
-
-return normalized;
+  return normalized;
 };
 
 // =========================================================
@@ -126,49 +93,38 @@ return normalized;
 // =========================================================
 
 const paystack = axios.create({
-baseURL: PAYSTACK_BASE_URL,
-timeout: 15000,
+  baseURL: PAYSTACK_BASE_URL,
+  timeout: 15000,
 
-headers: {
-"Content-Type":
-"application/json",
-},
+  headers: {
+    "Content-Type": "application/json",
+  },
 });
 
 // =========================================================
 // REQUEST INTERCEPTOR
 // =========================================================
 
-paystack.interceptors.request.use(
-(config) => {
-requirePaystackKey();
+paystack.interceptors.request.use((config) => {
+  requirePaystackKey();
 
+  config.headers = config.headers || {};
 
-config.headers =
-  config.headers || {};
+  config.headers.Authorization = `Bearer ${PAYSTACK_SECRET_KEY}`;
 
-config.headers.Authorization =
-  `Bearer ${PAYSTACK_SECRET_KEY}`;
-
-return config;
-
-
-}
-);
+  return config;
+});
 
 // =========================================================
 // RESPONSE / ERROR INTERCEPTOR
 // =========================================================
 
 paystack.interceptors.response.use(
-(response) => response,
+  (response) => response,
 
-(error) => {
-throw normalizePaystackError(
-error,
-"Paystack request failed"
-);
-}
+  (error) => {
+    throw normalizePaystackError(error, "Paystack request failed");
+  },
 );
 
 // =========================================================
@@ -176,316 +132,206 @@ error,
 // =========================================================
 
 const getPaystackBanks = async () => {
-const allBanks = [];
+  const allBanks = [];
 
-let page = 1;
+  let page = 1;
 
-try {
-while (page <= 10) {
-const response =
-await paystack.get("/bank", {
-params: {
-country: "nigeria",
-currency: "NGN",
-page,
-perPage: 100,
-},
-});
+  try {
+    while (page <= 10) {
+      const response = await paystack.get("/bank", {
+        params: {
+          country: "nigeria",
+          currency: "NGN",
+          page,
+          perPage: 100,
+        },
+      });
 
+      const banks = Array.isArray(response.data?.data)
+        ? response.data.data
+        : [];
 
-  const banks =
-    Array.isArray(
-      response.data?.data
-    )
-      ? response.data.data
-      : [];
+      if (banks.length === 0) {
+        break;
+      }
 
-  if (
-    banks.length === 0
-  ) {
-    break;
+      allBanks.push(...banks);
+
+      if (banks.length < 100) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return allBanks.filter(
+      (bank, index, array) =>
+        array.findIndex((item) => item.code === bank.code) === index,
+    );
+  } catch (error) {
+    throw normalizePaystackError(error, "Unable to retrieve Paystack banks");
   }
-
-  allBanks.push(...banks);
-
-  if (
-    banks.length < 100
-  ) {
-    break;
-  }
-
-  page += 1;
-}
-
-return allBanks.filter(
-  (bank, index, array) =>
-    array.findIndex(
-      (item) =>
-        item.code === bank.code
-    ) === index
-);
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Unable to retrieve Paystack banks"
-);
-}
 };
 
-const listBanks = async () =>
-getPaystackBanks();
+const listBanks = async () => getPaystackBanks();
 
 // =========================================================
 // FIND PAYSTACK BANK CODE BY BANK NAME
 // =========================================================
 
-const resolveBankCode = async (
-bankName
-) => {
-if (!bankName?.trim()) {
-throw new Error(
-"Bank name is required"
-);
-}
+const resolveBankCode = async (bankName) => {
+  if (!bankName?.trim()) {
+    throw new Error("Bank name is required");
+  }
 
-const banks =
-await getPaystackBanks();
+  const banks = await getPaystackBanks();
 
-const normalizedName =
-bankName
-.trim()
-.toLowerCase()
-.replace(/\s+/g, " ");
+  const normalizedName = bankName.trim().toLowerCase().replace(/\s+/g, " ");
 
-const bank = banks.find(
-(item) => {
-const name =
-String(
-item.name || ""
-)
-.trim()
-.toLowerCase()
-.replace(/\s+/g, " ");
+  const bank = banks.find((item) => {
+    const name = String(item.name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
 
+    return (
+      name === normalizedName ||
+      name.includes(normalizedName) ||
+      normalizedName.includes(name)
+    );
+  });
 
-  return (
-    name === normalizedName ||
-    name.includes(
-      normalizedName
-    ) ||
-    normalizedName.includes(
-      name
-    )
-  );
-}
+  if (!bank?.code) {
+    const error = new Error(`Bank "${bankName}" was not found on Paystack`);
 
+    error.statusCode = 400;
 
-);
+    throw error;
+  }
 
-if (!bank?.code) {
-const error = new Error(
-`Bank "${bankName}" was not found on Paystack`
-);
-
-
-error.statusCode = 400;
-
-throw error;
-
-
-}
-
-return bank.code;
+  return bank.code;
 };
 
 // =========================================================
 // RESOLVE BANK ACCOUNT
 // =========================================================
 
-const resolveBankAccount = async (
-accountNumber,
-bankCode
-) => {
-const normalizedAccountNumber =
-String(
-accountNumber || ""
-).replace(/\s/g, "");
+const resolveBankAccount = async (accountNumber, bankCode) => {
+  const normalizedAccountNumber = String(accountNumber || "").replace(
+    /\s/g,
+    "",
+  );
 
-if (
-!normalizedAccountNumber
-) {
-throw new Error(
-"Account number is required"
-);
-}
+  if (!normalizedAccountNumber) {
+    throw new Error("Account number is required");
+  }
 
-if (!bankCode?.trim()) {
-throw new Error(
-"Bank code is required"
-);
-}
+  if (!bankCode?.trim()) {
+    throw new Error("Bank code is required");
+  }
 
-try {
-const response =
-await paystack.get(
-"/bank/resolve",
-{
-params: {
-account_number:
-normalizedAccountNumber,
-bank_code:
-bankCode,
-},
-}
-);
+  try {
+    const response = await paystack.get("/bank/resolve", {
+      params: {
+        account_number: normalizedAccountNumber,
+        bank_code: bankCode,
+      },
+    });
 
-
-return (
-  response.data?.data ||
-  null
-);
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Bank account resolution failed"
-);
-}
+    return response.data?.data || null;
+  } catch (error) {
+    throw normalizePaystackError(error, "Bank account resolution failed");
+  }
 };
 
 // =========================================================
 // BANK ACCOUNT VERIFICATION
 // =========================================================
 
-const verifyBankAccount = async ({
-accountNumber,
-bankName,
-}) => {
-const normalizedAccountNumber =
-String(
-accountNumber || ""
-).replace(/\s/g, "");
+const verifyBankAccount = async ({ accountNumber, bankName }) => {
+  const normalizedAccountNumber = String(accountNumber || "").replace(
+    /\s/g,
+    "",
+  );
 
-if (
-!normalizedAccountNumber
-) {
-throw new Error(
-"Account number is required"
-);
-}
+  if (!normalizedAccountNumber) {
+    throw new Error("Account number is required");
+  }
 
-if (!bankName?.trim()) {
-throw new Error(
-"Bank name is required"
-);
-}
+  if (!bankName?.trim()) {
+    throw new Error("Bank name is required");
+  }
 
-// =======================================================
-// MOCK MODE
-// =======================================================
+  // =======================================================
+  // MOCK MODE
+  // =======================================================
 
-if (
-String(
-process.env.BANK_VERIFICATION_MODE ||
-""
-).toLowerCase() === "mock"
-) {
-return {
-verified: true,
+  if (
+    String(process.env.BANK_VERIFICATION_MODE || "").toLowerCase() === "mock"
+  ) {
+    return {
+      verified: true,
 
+      accountName: "Mock Account Holder",
 
-  accountName:
-    "Mock Account Holder",
+      accountNumber: normalizedAccountNumber,
 
-  accountNumber:
-    normalizedAccountNumber,
+      bankName: bankName.trim(),
 
-  bankName:
-    bankName.trim(),
+      provider: "mock",
 
-  provider: "mock",
+      reference: `MOCK-BANK-${Date.now()}`,
 
-  reference:
-    `MOCK-BANK-${Date.now()}`,
+      providerData: {
+        account_name: "Mock Account Holder",
 
-  providerData: {
-    account_name:
-      "Mock Account Holder",
+        account_number: normalizedAccountNumber,
 
-    account_number:
-      normalizedAccountNumber,
+        bank_name: bankName.trim(),
+      },
+    };
+  }
 
-    bank_name:
-      bankName.trim(),
-  },
-};
+  // =======================================================
+  // RESOLVE BANK CODE
+  // =======================================================
 
+  const bankCode = await resolveBankCode(bankName);
 
-}
+  // =======================================================
+  // PAYSTACK ACCOUNT RESOLUTION
+  // =======================================================
 
-// =======================================================
-// RESOLVE BANK CODE
-// =======================================================
+  const data = await resolveBankAccount(normalizedAccountNumber, bankCode);
 
-const bankCode =
-await resolveBankCode(
-bankName
-);
+  if (!data) {
+    throw new Error("Bank account verification failed");
+  }
 
-// =======================================================
-// PAYSTACK ACCOUNT RESOLUTION
-// =======================================================
+  return {
+    verified: true,
 
-const data =
-await resolveBankAccount(
-normalizedAccountNumber,
-bankCode
-);
+    accountName: data.account_name || null,
 
-if (!data) {
-throw new Error(
-"Bank account verification failed"
-);
-}
+    accountNumber: data.account_number || normalizedAccountNumber,
 
-return {
-verified: true,
+    bankName: bankName.trim(),
 
-
-accountName:
-  data.account_name ||
-  null,
-
-accountNumber:
-  data.account_number ||
-  normalizedAccountNumber,
-
-bankName:
-  bankName.trim(),
-
-bankCode,
-
-provider:
-  "paystack",
-
-reference:
-  `PAYSTACK-BANK-${Date.now()}-${crypto
-    .randomBytes(4)
-    .toString("hex")
-    .toUpperCase()}`,
-
-providerData: {
-  ...data,
-
-  bank_code:
     bankCode,
-},
 
+    provider: "paystack",
 
-};
+    reference: `PAYSTACK-BANK-${Date.now()}-${crypto
+      .randomBytes(4)
+      .toString("hex")
+      .toUpperCase()}`,
+
+    providerData: {
+      ...data,
+
+      bank_code: bankCode,
+    },
+  };
 };
 
 // =========================================================
@@ -498,26 +344,19 @@ providerData: {
 // Do not parse JSON before verification.
 // =========================================================
 
-const verifyWebhookSignature = ({
-  payload,
-  signature,
-}) => {
+const verifyWebhookSignature = ({ payload, signature }) => {
   if (!signature) {
     return false;
   }
 
   if (!PAYSTACK_SECRET_KEY) {
-    console.error(
-      "PAYSTACK_SECRET_KEY is not configured"
-    );
+    console.error("PAYSTACK_SECRET_KEY is not configured");
 
     return false;
   }
 
   if (!payload) {
-    console.error(
-      "PAYSTACK WEBHOOK RAW BODY IS MISSING"
-    );
+    console.error("PAYSTACK WEBHOOK RAW BODY IS MISSING");
 
     return false;
   }
@@ -528,10 +367,7 @@ const verifyWebhookSignature = ({
     if (Buffer.isBuffer(payload)) {
       rawPayload = payload;
     } else if (typeof payload === "string") {
-      rawPayload = Buffer.from(
-        payload,
-        "utf8"
-      );
+      rawPayload = Buffer.from(payload, "utf8");
     } else {
       /*
        * Do NOT reconstruct a Paystack webhook from
@@ -539,47 +375,28 @@ const verifyWebhookSignature = ({
        *
        * The controller should pass req.rawBody.
        */
-      console.error(
-        "PAYSTACK WEBHOOK REQUIRES RAW BODY"
-      );
+      console.error("PAYSTACK WEBHOOK REQUIRES RAW BODY");
 
       return false;
     }
 
-    const expectedSignature =
-      crypto
-        .createHmac(
-          "sha512",
-          PAYSTACK_SECRET_KEY
-        )
-        .update(rawPayload)
-        .digest("hex");
+    const expectedSignature = crypto
+      .createHmac("sha512", PAYSTACK_SECRET_KEY)
+      .update(rawPayload)
+      .digest("hex");
 
-    const receivedSignature =
-      String(signature).trim();
+    const receivedSignature = String(signature).trim();
 
-    if (
-      expectedSignature.length !==
-      receivedSignature.length
-    ) {
+    if (expectedSignature.length !== receivedSignature.length) {
       return false;
     }
 
     return crypto.timingSafeEqual(
-      Buffer.from(
-        expectedSignature,
-        "utf8"
-      ),
-      Buffer.from(
-        receivedSignature,
-        "utf8"
-      )
+      Buffer.from(expectedSignature, "utf8"),
+      Buffer.from(receivedSignature, "utf8"),
     );
   } catch (error) {
-    console.error(
-      "PAYSTACK WEBHOOK SIGNATURE ERROR:",
-      error.message
-    );
+    console.error("PAYSTACK WEBHOOK SIGNATURE ERROR:", error.message);
 
     return false;
   }
@@ -594,74 +411,49 @@ const validateCustomerIdentity = async ({
   bankCode,
 }) => {
   if (!customerCode) {
-    throw new Error(
-      "Paystack customer code is required",
-    );
+    throw new Error("Paystack customer code is required");
   }
 
   if (!firstName) {
-    throw new Error(
-      "Customer first name is required",
-    );
+    throw new Error("Customer first name is required");
   }
 
   if (!lastName) {
-    throw new Error(
-      "Customer last name is required",
-    );
+    throw new Error("Customer last name is required");
   }
 
   if (!/^\d{11}$/.test(String(bvn || ""))) {
-    throw new Error(
-      "BVN must contain exactly 11 digits",
-    );
+    throw new Error("BVN must contain exactly 11 digits");
   }
 
-  if (
-    !/^\d{10}$/.test(
-      String(accountNumber || ""),
-    )
-  ) {
-    throw new Error(
-      "Bank account number must contain exactly 10 digits",
-    );
+  if (!/^\d{10}$/.test(String(accountNumber || ""))) {
+    throw new Error("Bank account number must contain exactly 10 digits");
   }
 
   if (!bankCode) {
-    throw new Error(
-      "Bank code is required",
-    );
+    throw new Error("Bank code is required");
   }
 
   try {
     const response = await paystack.post(
-      `/customer/${encodeURIComponent(
-        customerCode,
-      )}/identification`,
+      `/customer/${encodeURIComponent(customerCode)}/identification`,
       {
         country: "NG",
         type: "bank_account",
 
-        account_number:
-          String(accountNumber),
+        account_number: String(accountNumber),
 
         bvn: String(bvn),
 
-        bank_code:
-          String(bankCode),
+        bank_code: String(bankCode),
 
-        first_name:
-          String(firstName).trim(),
+        first_name: String(firstName).trim(),
 
-        last_name:
-          String(lastName).trim(),
+        last_name: String(lastName).trim(),
       },
     );
 
-    return (
-      response.data?.data ||
-      response.data
-    );
+    return response.data?.data || response.data;
   } catch (error) {
     throw normalizePaystackError(
       error,
@@ -674,92 +466,64 @@ const validateCustomerIdentity = async ({
 // =========================================================
 
 const createOrGetCustomer = async ({
-email,
-firstName,
-lastName,
-phone,
-metadata = {},
+  email,
+  firstName,
+  lastName,
+  phone,
+  metadata = {},
 }) => {
-if (!email) {
-throw new Error(
-"Customer email is required"
-);
-}
+  if (!email) {
+    throw new Error("Customer email is required");
+  }
 
-// =======================================================
-// TRY EXISTING CUSTOMER
-// =======================================================
+  // =======================================================
+  // TRY EXISTING CUSTOMER
+  // =======================================================
 
-try {
-const response =
-await paystack.get(
-`/customer/${encodeURIComponent(
-          email
-        )}`
-);
+  try {
+    const response = await paystack.get(
+      `/customer/${encodeURIComponent(email)}`,
+    );
 
+    const data = response.data?.data;
 
-const data =
-  response.data?.data;
+    if (data?.customer_code) {
+      return {
+        provider: "paystack",
 
-if (
-  data?.customer_code
-) {
-  return {
-    provider:
-      "paystack",
+        customerId: data.customer_code,
 
-    customerId:
-      data.customer_code,
+        customerCode: data.customer_code,
 
-    customerCode:
-      data.customer_code,
+        email: data.email || email,
 
-    email:
-      data.email ||
+        providerData: data,
+      };
+    }
+  } catch (error) {
+    // -----------------------------------------------------
+    // Only a real 404 should cause customer creation.
+    // -----------------------------------------------------
+
+    if (error.statusCode !== 404) {
+      throw error;
+    }
+  }
+
+  // =======================================================
+  // CREATE CUSTOMER
+  // =======================================================
+
+  try {
+    const response = await paystack.post("/customer", {
       email,
 
-    providerData:
-      data,
-  };
-}
-
-
-} catch (error) {
-// -----------------------------------------------------
-// Only a real 404 should cause customer creation.
-// -----------------------------------------------------
-
-
-if (
-  error.statusCode !== 404
-) {
-  throw error;
-}
-
-
-}
-
-// =======================================================
-// CREATE CUSTOMER
-// =======================================================
-
-try {
-const response =
-await paystack.post(
-"/customer",
-{
-email,
-
-
       ...(firstName && {
-        first_name:
-          firstName,
+        first_name: firstName,
       }),
 
       ...(lastName && {
-        last_name:
-          lastName,
+        last_name: lastName,
       }),
 
       ...(phone && {
@@ -767,56 +531,43 @@ email,
       }),
 
       metadata,
+    });
+
+    const data = response.data?.data;
+
+    if (!data?.customer_code) {
+      throw new Error("Paystack customer code was not returned");
     }
-  );
 
-const data =
-  response.data?.data;
+    return {
+      provider: "paystack",
 
-if (
-  !data?.customer_code
-) {
-  throw new Error(
-    "Paystack customer code was not returned"
-  );
-}
+      customerId: data.customer_code,
 
-return {
-  provider:
-    "paystack",
+      customerCode: data.customer_code,
 
-  customerId:
-    data.customer_code,
+      email: data.email || email,
 
-  customerCode:
-    data.customer_code,
-
-  email:
-    data.email ||
-    email,
-
-  providerData:
-    data,
-};
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Unable to create Paystack customer"
-);
-}
+      providerData: data,
+    };
+  } catch (error) {
+    throw normalizePaystackError(error, "Unable to create Paystack customer");
+  }
 };
 
 // =========================================================
-// CREATE DEDICATED VIRTUAL ACCOUNT
+// ASSIGN DEDICATED VIRTUAL ACCOUNT
 // =========================================================
 //
-// Creates a Paystack Dedicated Virtual Account for an
+// Assigns a Paystack Dedicated Virtual Account to an
 // existing Paystack customer.
 //
-// The customer must already exist.
-// We do NOT create a new Paystack customer here.
+// IMPORTANT:
+// Paystack may process the assignment asynchronously.
+// Do NOT require account_number in the immediate response.
+//
+// The actual DVA details should be persisted when the
+// dedicatedaccount.assign.success webhook is received.
 //
 // =========================================================
 
@@ -830,19 +581,15 @@ const createDedicatedVirtualAccount = async ({
   metadata = {},
 }) => {
   if (!customerCode) {
-    throw new Error(
-      "Paystack customer code is required",
-    );
+    throw new Error("Paystack customer code is required");
   }
 
   try {
     const payload = {
-      customer:
-        customerCode,
+      customer: customerCode,
 
       ...(preferredBank && {
-        preferred_bank:
-          preferredBank,
+        preferred_bank: preferredBank,
       }),
 
       ...(phone && {
@@ -850,13 +597,11 @@ const createDedicatedVirtualAccount = async ({
       }),
 
       ...(firstName && {
-        first_name:
-          firstName,
+        first_name: firstName,
       }),
 
       ...(lastName && {
-        last_name:
-          lastName,
+        last_name: lastName,
       }),
 
       ...(email && {
@@ -868,226 +613,151 @@ const createDedicatedVirtualAccount = async ({
       }),
     };
 
-    const response =
-      await paystack.post(
-        "/dedicated_account",
-        payload,
-      );
+    const response = await paystack.post(
+      "/dedicated_account/assign",
+      payload,
+    );
 
-    const data =
-      response.data?.data;
-
-    if (!data) {
-      throw new Error(
-        "Paystack dedicated virtual account was not created",
-      );
-    }
-
-    if (!data.account_number) {
-      throw new Error(
-        "Paystack did not return a dedicated account number",
-      );
-    }
+    const data = response.data?.data || null;
 
     return {
-      provider:
-        "paystack",
+      provider: "paystack",
 
-      providerAccountId:
-        data.id || null,
+      status: "pending",
 
-      accountNumber:
-        data.account_number,
+      assigned: false,
 
-      accountName:
-        data.account_name ||
-        null,
+      providerAccountId: data?.id || null,
 
-      bankName:
-        data.bank?.name ||
-        null,
+      accountNumber: data?.account_number || null,
 
-      bankCode:
-        data.bank?.code ||
-        null,
+      accountName: data?.account_name || null,
 
-      currency:
-        data.currency ||
-        "NGN",
+      bankName: data?.bank?.name || null,
+
+      bankCode: data?.bank?.code || null,
+
+      currency: data?.currency || "NGN",
 
       customerCode:
-        data.customer?.customer_code ||
+        data?.customer?.customer_code ||
+        data?.customer_code ||
         customerCode,
 
-      providerData:
-        data,
+      providerData: data || response.data,
     };
   } catch (error) {
     throw normalizePaystackError(
       error,
-      "Unable to create Paystack dedicated virtual account",
+      "Unable to assign Paystack dedicated virtual account",
     );
   }
 };
-
 
 // =========================================================
 // INITIALIZE PAYMENT
 // =========================================================
 
 const initializePayment = async ({
-reference,
-amount,
-currency = "NGN",
-email,
-metadata = {},
-callbackUrl,
-channels,
-}) => {
-if (!reference) {
-throw new Error(
-"Payment reference is required"
-);
-}
-
-if (!email) {
-throw new Error(
-"Customer email is required"
-);
-}
-
-const numericAmount =
-Number(amount);
-
-if (
-!Number.isFinite(
-numericAmount
-) ||
-numericAmount <= 0
-) {
-throw new Error(
-"Payment amount must be greater than zero"
-);
-}
-
-const payload = {
-email,
-
-
-amount:
-  toKobo(numericAmount),
-
-currency:
-  String(currency)
-    .toUpperCase(),
-
-reference,
-
-metadata,
-
-...(callbackUrl && {
-  callback_url:
-    callbackUrl,
-}),
-
-...(channels && {
+  reference,
+  amount,
+  currency = "NGN",
+  email,
+  metadata = {},
+  callbackUrl,
   channels,
-}),
+}) => {
+  if (!reference) {
+    throw new Error("Payment reference is required");
+  }
 
+  if (!email) {
+    throw new Error("Customer email is required");
+  }
 
-};
+  const numericAmount = Number(amount);
 
-try {
-const response =
-await paystack.post(
-"/transaction/initialize",
-payload
-);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    throw new Error("Payment amount must be greater than zero");
+  }
 
+  const payload = {
+    email,
 
-const data =
-  response.data?.data;
+    amount: toKobo(numericAmount),
 
-if (!data) {
-  throw new Error(
-    "Paystack failed to initialize payment"
-  );
-}
+    currency: String(currency).toUpperCase(),
 
-return {
-  provider:
-    "paystack",
-
-  reference:
-    data.reference ||
     reference,
 
-  authorizationUrl:
-    data.authorization_url ||
-    null,
+    metadata,
 
-  accessCode:
-    data.access_code ||
-    null,
+    ...(callbackUrl && {
+      callback_url: callbackUrl,
+    }),
 
-  amount:
-    numericAmount,
+    ...(channels && {
+      channels,
+    }),
+  };
 
-  currency:
-    String(currency)
-      .toUpperCase(),
+  try {
+    const response = await paystack.post("/transaction/initialize", payload);
 
-  email,
+    const data = response.data?.data;
 
-  metadata,
+    if (!data) {
+      throw new Error("Paystack failed to initialize payment");
+    }
 
-  providerData:
-    data,
-};
+    return {
+      provider: "paystack",
 
+      reference: data.reference || reference,
 
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Paystack payment initialization failed"
-);
-}
+      authorizationUrl: data.authorization_url || null,
+
+      accessCode: data.access_code || null,
+
+      amount: numericAmount,
+
+      currency: String(currency).toUpperCase(),
+
+      email,
+
+      metadata,
+
+      providerData: data,
+    };
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Paystack payment initialization failed",
+    );
+  }
 };
 
 // =========================================================
 // VERIFY TRANSACTION
 // =========================================================
 
-const verifyTransaction = async (
-reference
-) => {
-if (!reference) {
-throw new Error(
-"Transaction reference is required"
-);
-}
+const verifyTransaction = async (reference) => {
+  if (!reference) {
+    throw new Error("Transaction reference is required");
+  }
 
-try {
-const response =
-await paystack.get(
-`/transaction/verify/${encodeURIComponent(
-          reference
-        )}`
-);
+  try {
+    const response = await paystack.get(
+      `/transaction/verify/${encodeURIComponent(reference)}`,
+    );
 
-
-return (
-  response.data?.data ||
-  null
-);
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Paystack transaction verification failed"
-);
-}
+    return response.data?.data || null;
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Paystack transaction verification failed",
+    );
+  }
 };
 
 // =========================================================
@@ -1095,85 +765,54 @@ error,
 // =========================================================
 
 const chargeAuthorization = async ({
-email,
-amount,
-authorizationCode,
-reference,
-currency = "NGN",
-metadata = {},
+  email,
+  amount,
+  authorizationCode,
+  reference,
+  currency = "NGN",
+  metadata = {},
 }) => {
-if (!email) {
-throw new Error(
-"Customer email is required"
-);
-}
+  if (!email) {
+    throw new Error("Customer email is required");
+  }
 
-if (!authorizationCode) {
-throw new Error(
-"Authorization code is required"
-);
-}
+  if (!authorizationCode) {
+    throw new Error("Authorization code is required");
+  }
 
-const numericAmount =
-Number(amount);
+  const numericAmount = Number(amount);
 
-if (
-!Number.isFinite(
-numericAmount
-) ||
-numericAmount <= 0
-) {
-throw new Error(
-"Charge amount must be greater than zero"
-);
-}
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    throw new Error("Charge amount must be greater than zero");
+  }
 
-try {
-const response =
-await paystack.post(
-"/transaction/charge_authorization",
-{
-email,
+  try {
+    const response = await paystack.post("/transaction/charge_authorization", {
+      email,
 
+      amount: toKobo(numericAmount),
 
-      amount:
-        toKobo(
-          numericAmount
-        ),
-
-      authorization_code:
-        authorizationCode,
+      authorization_code: authorizationCode,
 
       ...(reference && {
         reference,
       }),
 
-      currency:
-        String(currency)
-          .toUpperCase(),
+      currency: String(currency).toUpperCase(),
 
       metadata,
+    });
+
+    const data = response.data?.data;
+
+    if (!data) {
+      throw new Error("Paystack authorization charge failed");
     }
-  );
 
-const data =
-  response.data?.data;
-
-if (!data) {
-  throw new Error(
-    "Paystack authorization charge failed"
-  );
-}
-
-return data;
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Paystack authorization charge failed"
-);
-}
+    return data;
+  } catch (error) {
+    throw normalizePaystackError(error, "Paystack authorization charge failed");
+  }
 };
 
 // =========================================================
@@ -1181,80 +820,52 @@ error,
 // =========================================================
 
 const createTransferRecipient = async ({
-name,
-accountName,
-accountNumber,
-bankCode,
-currency = "NGN",
+  name,
+  accountName,
+  accountNumber,
+  bankCode,
+  currency = "NGN",
 }) => {
-const recipientName =
-name ||
-accountName;
+  const recipientName = name || accountName;
 
-if (!recipientName) {
-throw new Error(
-"Transfer recipient name is required"
-);
-}
+  if (!recipientName) {
+    throw new Error("Transfer recipient name is required");
+  }
 
-if (!accountNumber) {
-throw new Error(
-"Transfer recipient account number is required"
-);
-}
+  if (!accountNumber) {
+    throw new Error("Transfer recipient account number is required");
+  }
 
-if (!bankCode) {
-throw new Error(
-"Transfer recipient bank code is required"
-);
-}
+  if (!bankCode) {
+    throw new Error("Transfer recipient bank code is required");
+  }
 
-try {
-const response =
-await paystack.post(
-"/transferrecipient",
-{
-type: "nuban",
+  try {
+    const response = await paystack.post("/transferrecipient", {
+      type: "nuban",
 
+      name: recipientName,
 
-      name:
-        recipientName,
+      account_number: String(accountNumber).replace(/\s/g, ""),
 
-      account_number:
-        String(
-          accountNumber
-        ).replace(
-          /\s/g,
-          ""
-        ),
+      bank_code: bankCode,
 
-      bank_code:
-        bankCode,
+      currency: String(currency).toUpperCase(),
+    });
 
-      currency:
-        String(currency)
-          .toUpperCase(),
+    const data = response.data?.data;
+
+    if (!data) {
+      throw new Error("Paystack transfer recipient was not created");
     }
-  );
 
-const data =
-  response.data?.data;
-
-if (!data) {
-  throw new Error(
-    "Paystack transfer recipient was not created"
-  );
-}
-
-return data;
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Unable to create Paystack transfer recipient"
-);
-}
+    return data;
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Unable to create Paystack transfer recipient",
+    );
+  }
 };
 
 // =========================================================
@@ -1270,51 +881,31 @@ error,
 // =========================================================
 
 const initiateTransfer = async ({
-amount,
-recipient,
-reference,
-reason,
-currency = "NGN",
+  amount,
+  recipient,
+  reference,
+  reason,
+  currency = "NGN",
 }) => {
-const numericAmount =
-Number(amount);
+  const numericAmount = Number(amount);
 
-if (
-!Number.isFinite(
-numericAmount
-) ||
-numericAmount <= 0
-) {
-throw new Error(
-"Transfer amount must be greater than zero"
-);
-}
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    throw new Error("Transfer amount must be greater than zero");
+  }
 
-if (!recipient) {
-throw new Error(
-"Transfer recipient is required"
-);
-}
+  if (!recipient) {
+    throw new Error("Transfer recipient is required");
+  }
 
-if (!reference) {
-throw new Error(
-"Transfer reference is required"
-);
-}
+  if (!reference) {
+    throw new Error("Transfer reference is required");
+  }
 
-try {
-const response =
-await paystack.post(
-"/transfer",
-{
-source:
-"balance",
+  try {
+    const response = await paystack.post("/transfer", {
+      source: "balance",
 
-
-      amount:
-        toKobo(
-          numericAmount
-        ),
+      amount: toKobo(numericAmount),
 
       recipient,
 
@@ -1322,48 +913,29 @@ source:
 
       reason,
 
-      currency:
-        String(currency)
-          .toUpperCase(),
+      currency: String(currency).toUpperCase(),
+    });
+
+    const data = response.data?.data;
+
+    if (!data) {
+      throw new Error("Paystack transfer was not initialized");
     }
-  );
 
-const data =
-  response.data?.data;
+    return {
+      ...data,
 
-if (!data) {
-  throw new Error(
-    "Paystack transfer was not initialized"
-  );
-}
+      provider: "paystack",
 
-return {
-  ...data,
+      reference: data.reference || reference,
 
-  provider:
-    "paystack",
+      amount: fromKobo(data.amount),
 
-  reference:
-    data.reference ||
-    reference,
-
-  amount:
-    fromKobo(
-      data.amount
-    ),
-
-  currency:
-    data.currency ||
-    currency,
-};
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Paystack transfer initiation failed"
-);
-}
+      currency: data.currency || currency,
+    };
+  } catch (error) {
+    throw normalizePaystackError(error, "Paystack transfer initiation failed");
+  }
 };
 
 // =========================================================
@@ -1371,456 +943,431 @@ error,
 // =========================================================
 
 const createMandate = async ({
-customer,
-bankAccount,
-reference,
-metadata = {},
-callbackUrl,
+  customer,
+  bankAccount,
+  reference,
+  metadata = {},
+  callbackUrl,
 }) => {
-if (!customer?.email) {
-throw new Error(
-"Customer email is required for mandate"
-);
-}
+  if (!customer?.email) {
+    throw new Error("Customer email is required for mandate");
+  }
 
-if (!bankAccount?.accountNumber) {
-throw new Error(
-"Bank account number is required"
-);
-}
+  if (!bankAccount?.accountNumber) {
+    throw new Error("Bank account number is required");
+  }
 
-if (!bankAccount?.bankCode) {
-throw new Error(
-"Bank code is required"
-);
-}
+  if (!bankAccount?.bankCode) {
+    throw new Error("Bank code is required");
+  }
 
-if (!reference) {
-throw new Error(
-"Mandate reference is required"
-);
-}
+  if (!reference) {
+    throw new Error("Mandate reference is required");
+  }
 
-const providerCustomer =
-await createOrGetCustomer({
-email:
-customer.email,
+  const providerCustomer = await createOrGetCustomer({
+    email: customer.email,
 
+    firstName: customer.firstName || customer.first_name,
 
-  firstName:
-    customer.firstName ||
-    customer.first_name,
+    lastName: customer.lastName || customer.last_name,
 
-  lastName:
-    customer.lastName ||
-    customer.last_name,
+    phone: customer.phone,
 
-  phone:
-    customer.phone,
+    metadata: {
+      mandateReference: reference,
 
-  metadata: {
-    mandateReference:
-      reference,
+      ...metadata,
+    },
+  });
 
-    ...metadata,
-  },
-});
+  try {
+    const response = await paystack.post("/customer/authorization/initialize", {
+      email: customer.email,
 
-
-try {
-const response =
-await paystack.post(
-"/customer/authorization/initialize",
-{
-email:
-customer.email,
-
-
-      channel:
-        "direct_debit",
+      channel: "direct_debit",
 
       ...(callbackUrl && {
-        callback_url:
-          callbackUrl,
+        callback_url: callbackUrl,
       }),
 
       account: {
-        number:
-          String(
-            bankAccount.accountNumber
-          ).replace(
-            /\s/g,
-            ""
-          ),
+        number: String(bankAccount.accountNumber).replace(/\s/g, ""),
 
-        bank_code:
-          bankAccount.bankCode,
+        bank_code: bankAccount.bankCode,
       },
 
       metadata: {
-        mandateReference:
-          reference,
+        mandateReference: reference,
 
-        providerCustomerId:
-          providerCustomer.customerId,
+        providerCustomerId: providerCustomer.customerId,
 
         ...metadata,
       },
+    });
+
+    const data = response.data?.data;
+
+    if (!data) {
+      throw new Error("Paystack failed to initialize mandate");
     }
-  );
 
-const data =
-  response.data?.data;
+    if (!data.reference) {
+      throw new Error("Paystack mandate reference was not returned");
+    }
 
-if (!data) {
-  throw new Error(
-    "Paystack failed to initialize mandate"
-  );
-}
+    return {
+      provider: "paystack",
 
-if (!data.reference) {
-  throw new Error(
-    "Paystack mandate reference was not returned"
-  );
-}
+      mandateId: data.reference,
 
-return {
-  provider:
-    "paystack",
+      providerMandateId: data.reference,
 
-  mandateId:
-    data.reference,
+      providerCustomerId: providerCustomer.customerId,
 
-  providerMandateId:
-    data.reference,
+      authorizationReference: data.reference,
 
-  providerCustomerId:
-    providerCustomer.customerId,
+      authorizationUrl: data.redirect_url || null,
 
-  authorizationReference:
-    data.reference,
+      status: "authorization_required",
 
-  authorizationUrl:
-    data.redirect_url ||
-    null,
+      providerData: {
+        reference: data.reference,
 
-  status:
-    "authorization_required",
+        accessCode: data.access_code || null,
 
-  providerData: {
-    reference:
-      data.reference,
+        redirectUrl: data.redirect_url || null,
 
-    accessCode:
-      data.access_code ||
-      null,
+        customer: providerCustomer.providerData || null,
 
-    redirectUrl:
-      data.redirect_url ||
-      null,
+        providerCustomerId: providerCustomer.customerId,
 
-    customer:
-      providerCustomer.providerData ||
-      null,
-
-    providerCustomerId:
-      providerCustomer.customerId,
-
-    metadata:
-      data.metadata ||
-      metadata,
-  },
-};
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Paystack mandate initialization failed"
-);
-}
+        metadata: data.metadata || metadata,
+      },
+    };
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Paystack mandate initialization failed",
+    );
+  }
 };
 
 // =========================================================
 // GET DIRECT DEBIT MANDATE STATUS
 // =========================================================
 
-const getMandateStatus = async (
-providerMandateId
-) => {
-if (!providerMandateId) {
-throw new Error(
-"Provider mandate reference is required"
-);
-}
+const getMandateStatus = async (providerMandateId) => {
+  if (!providerMandateId) {
+    throw new Error("Provider mandate reference is required");
+  }
 
-try {
-const response =
-await paystack.get(
-`/customer/authorization/verify/${encodeURIComponent(
-          providerMandateId
-        )}`
-);
+  try {
+    const response = await paystack.get(
+      `/customer/authorization/verify/${encodeURIComponent(providerMandateId)}`,
+    );
 
+    const data = response.data?.data;
 
-const data =
-  response.data?.data;
+    if (!data) {
+      throw new Error("Paystack mandate status was not returned");
+    }
 
-if (!data) {
-  throw new Error(
-    "Paystack mandate status was not returned"
-  );
-}
+    let status = "pending";
 
-let status =
-  "pending";
+    if (data.active === true) {
+      status = "active";
+    } else if (data.authorization_code) {
+      status = "authorized";
+    }
 
-if (
-  data.active === true
-) {
-  status =
-    "active";
-} else if (
-  data.authorization_code
-) {
-  status =
-    "authorized";
-}
+    const providerCustomerId =
+      data.customer?.customer_code || data.customer?.code || null;
 
-const providerCustomerId =
-  data.customer
-    ?.customer_code ||
-  data.customer?.code ||
-  null;
+    return {
+      provider: "paystack",
 
-return {
-  provider:
-    "paystack",
+      mandateId: providerMandateId,
 
-  mandateId:
-    providerMandateId,
+      providerMandateId,
 
-  providerMandateId,
+      providerCustomerId,
 
-  providerCustomerId,
+      status,
 
-  status,
+      active: Boolean(data.active),
 
-  active:
-    Boolean(
-      data.active
-    ),
+      reusable: Boolean(data.reusable),
 
-  reusable:
-    Boolean(
-      data.reusable
-    ),
+      authorizationCode: data.authorization_code || null,
 
-  authorizationCode:
-    data.authorization_code ||
-    null,
+      authorizationReference:
+        data.authorization_reference || data.reference || null,
 
-  authorizationReference:
-    data.authorization_reference ||
-    data.reference ||
-    null,
+      bank: data.bank || null,
 
-  bank:
-    data.bank ||
-    null,
+      accountName: data.account_name || null,
 
-  accountName:
-    data.account_name ||
-    null,
+      last4: data.last4 || null,
 
-  last4:
-    data.last4 ||
-    null,
+      customer: data.customer || null,
 
-  customer:
-    data.customer ||
-    null,
-
-  providerData:
-    data,
-};
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Unable to retrieve Paystack mandate status"
-);
-}
+      providerData: data,
+    };
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Unable to retrieve Paystack mandate status",
+    );
+  }
 };
 
 // =========================================================
 // CANCEL / DEACTIVATE MANDATE
 // =========================================================
 
-const cancelMandate = async (
-authorizationCode
-) => {
-if (!authorizationCode) {
-throw new Error(
-"Paystack authorization code is required"
-);
-}
+const cancelMandate = async (authorizationCode) => {
+  if (!authorizationCode) {
+    throw new Error("Paystack authorization code is required");
+  }
 
-try {
-const response =
-await paystack.post(
-"/customer/authorization/deactivate",
-{
-authorization_code:
-authorizationCode,
-}
-);
+  try {
+    const response = await paystack.post("/customer/authorization/deactivate", {
+      authorization_code: authorizationCode,
+    });
 
+    return {
+      provider: "paystack",
 
-return {
-  provider:
-    "paystack",
+      status: "cancelled",
 
-  status:
-    "cancelled",
-
-  providerData:
-    response.data?.data ||
-    response.data,
-};
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Unable to deactivate Paystack mandate"
-);
-}
+      providerData: response.data?.data || response.data,
+    };
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Unable to deactivate Paystack mandate",
+    );
+  }
 };
 
 // =========================================================
 // TRIGGER DIRECT DEBIT ACTIVATION CHARGE
 // =========================================================
 
-const triggerActivationCharge = async ({
-customerId,
-authorizationId,
-}) => {
-if (!customerId) {
-throw new Error(
-"Paystack customer ID is required"
-);
-}
+const triggerActivationCharge = async ({ customerId, authorizationId }) => {
+  if (!customerId) {
+    throw new Error("Paystack customer ID is required");
+  }
 
-if (!authorizationId) {
-throw new Error(
-"Paystack authorization ID is required"
-);
-}
+  if (!authorizationId) {
+    throw new Error("Paystack authorization ID is required");
+  }
 
-try {
-const response =
-await paystack.put(
-`/customer/${encodeURIComponent(
-          customerId
-        )}/directdebit-activation-charge`,
-{
-authorization_id:
-authorizationId,
-}
-);
+  try {
+    const response = await paystack.put(
+      `/customer/${encodeURIComponent(
+        customerId,
+      )}/directdebit-activation-charge`,
+      {
+        authorization_id: authorizationId,
+      },
+    );
 
+    return {
+      provider: "paystack",
 
-return {
-  provider:
-    "paystack",
+      queued: true,
 
-  queued:
-    true,
-
-  providerData:
-    response.data,
-};
-
-
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Unable to trigger direct debit activation charge"
-);
-}
+      providerData: response.data,
+    };
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Unable to trigger direct debit activation charge",
+    );
+  }
 };
 
 // =========================================================
 // LIST CUSTOMER MANDATES
 // =========================================================
 
-const getCustomerMandates = async (
-customerId
+const getCustomerMandates = async (customerId) => {
+  if (!customerId) {
+    throw new Error("Paystack customer ID is required");
+  }
+
+  try {
+    const response = await paystack.get(
+      `/customer/${encodeURIComponent(
+        customerId,
+      )}/directdebit-mandate-authorizations`,
+    );
+
+    return {
+      provider: "paystack",
+
+      data: response.data?.data || [],
+
+      meta: response.data?.meta || null,
+    };
+  } catch (error) {
+    throw normalizePaystackError(error, "Unable to retrieve customer mandates");
+  }
+};
+
+// =========================================================
+// GET DEDICATED VIRTUAL ACCOUNT
+// =========================================================
+
+const getDedicatedVirtualAccount = async (
+  dedicatedAccountId
 ) => {
-if (!customerId) {
-throw new Error(
-"Paystack customer ID is required"
-);
-}
+  if (!dedicatedAccountId) {
+    throw new Error(
+      "Paystack dedicated account ID is required"
+    );
+  }
 
-try {
-const response =
-await paystack.get(
-`/customer/${encodeURIComponent(
-          customerId
-        )}/directdebit-mandate-authorizations`
-);
+  try {
+    const response = await paystack.get(
+      `/dedicated_account/${encodeURIComponent(
+        dedicatedAccountId
+      )}`
+    );
 
+    const data = response.data?.data;
 
-return {
-  provider:
-    "paystack",
+    if (!data) {
+      throw new Error(
+        "Paystack dedicated virtual account was not found"
+      );
+    }
 
-  data:
-    response.data?.data ||
-    [],
+    return {
+      provider: "paystack",
 
-  meta:
-    response.data?.meta ||
-    null,
+      providerAccountId:
+        data.id || dedicatedAccountId,
+
+      accountNumber:
+        data.account_number || null,
+
+      accountName:
+        data.account_name || null,
+
+      bankName:
+        data.bank?.name || null,
+
+      bankCode:
+        data.bank?.code || null,
+
+      bankSlug:
+        data.bank?.slug || null,
+
+      currency:
+        data.currency || "NGN",
+
+      active:
+        Boolean(data.active),
+
+      assigned:
+        Boolean(data.assigned),
+
+      customerCode:
+        data.customer?.customer_code ||
+        data.customer_code ||
+        null,
+
+      providerData:
+        data,
+    };
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Unable to retrieve Paystack dedicated virtual account"
+    );
+  }
 };
 
+// =========================================================
+// LIST DEDICATED VIRTUAL ACCOUNTS
+// =========================================================
 
-} catch (error) {
-throw normalizePaystackError(
-error,
-"Unable to retrieve customer mandates"
-);
-}
+const listDedicatedVirtualAccounts = async ({
+  customer,
+  active,
+  currency = "NGN",
+  providerSlug,
+  page = 1,
+  perPage = 50,
+} = {}) => {
+  try {
+    const response = await paystack.get(
+      "/dedicated_account",
+      {
+        params: {
+          ...(customer && { customer }),
+          ...(typeof active === "boolean" && { active }),
+          ...(currency && { currency }),
+          ...(providerSlug && {
+            provider_slug: providerSlug,
+          }),
+          page,
+          perPage,
+        },
+      }
+    );
+
+    return {
+      provider: "paystack",
+
+      data:
+        response.data?.data || [],
+
+      meta:
+        response.data?.meta || null,
+
+      providerData:
+        response.data,
+    };
+  } catch (error) {
+    throw normalizePaystackError(
+      error,
+      "Unable to retrieve Paystack dedicated virtual accounts"
+    );
+  }
 };
+
 
 // =========================================================
 // EXPORT
 // =========================================================
 
 module.exports = {
-verifyBankAccount,
-resolveBankAccount,
-resolveBankCode,
-getPaystackBanks,
-listBanks,
+  verifyBankAccount,
+  resolveBankAccount,
+  resolveBankCode,
+  getPaystackBanks,
+  listBanks,
 
-verifyWebhookSignature,
-validateCustomerIdentity,
-initializePayment,
-verifyTransaction,
-chargeAuthorization,
+  verifyWebhookSignature,
+  validateCustomerIdentity,
+  initializePayment,
+  verifyTransaction,
+  chargeAuthorization,
 
-createTransferRecipient,
-initiateTransfer,
+  createTransferRecipient,
+  initiateTransfer,
 
-createMandate,
-getMandateStatus,
-cancelMandate,
-triggerActivationCharge,
-getCustomerMandates,
-createOrGetCustomer,
-createDedicatedVirtualAccount,
+  createMandate,
+  getMandateStatus,
+  cancelMandate,
+  triggerActivationCharge,
+  getCustomerMandates,
+  createOrGetCustomer,
+  createDedicatedVirtualAccount,
+  getDedicatedVirtualAccount,
+  listDedicatedVirtualAccounts,
 };

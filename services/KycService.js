@@ -3,7 +3,8 @@ const KycRepository = require("../repositories/KycRepository");
 const BankAccountRepository = require("../repositories/BankAccountRepository");
 const User = require("../model/UserModel");
 const PaymentProvider = require("../config/PaymentProvider");
-const SmileIdentityProvider = require("../config/SmileIdentityProvider");
+const RepaymentAccountService =
+  require("../services/RepaymentAccountService");
 
 const createError = (message, statusCode = 400) => {
   const error = new Error(message);
@@ -102,6 +103,384 @@ const validateIdType = (idType) => {
 const getMyKyc = async (userId) => {
   return KycRepository.findByUserId(userId);
 };
+
+
+/*
+ * ============================================================
+ * ADMIN KYC
+ * ============================================================
+ */
+
+/**
+ * Get all KYC records.
+ */
+const getAllKyc = async () => {
+  return KycRepository.findAllKyc();
+};
+
+/**
+ * Get one KYC record by ID.
+ */
+const getKycById = async (kycId) => {
+  if (!kycId) {
+    throw createError(
+      "KYC ID is required",
+      400,
+    );
+  }
+
+  const kyc =
+    await KycRepository.findById(
+      kycId,
+    );
+
+  if (!kyc) {
+    throw createError(
+      "KYC record not found",
+      404,
+    );
+  }
+
+  return kyc;
+};
+
+/**
+ * Get pending/submitted KYC records.
+ */
+const getPendingKyc = async () => {
+  return KycRepository.findPendingKyc();
+};
+
+/**
+ * Admin verifies a KYC record.
+ */
+const verifyKyc = async (
+  kycId,
+  adminUserId,
+) => {
+  if (!kycId) {
+    throw createError(
+      "KYC ID is required",
+      400,
+    );
+  }
+
+  if (!adminUserId) {
+    throw createError(
+      "Admin user is required",
+      401,
+    );
+  }
+
+  const kyc =
+    await KycRepository.findById(
+      kycId,
+    );
+
+  if (!kyc) {
+    throw createError(
+      "KYC record not found",
+      404,
+    );
+  }
+
+  /*
+   * ----------------------------------------------------------
+   * AUTOMATED VERIFICATION REQUIREMENTS
+   * ----------------------------------------------------------
+   */
+
+  if (
+    String(
+      kyc.bvnVerificationStatus || "",
+    )
+      .trim()
+      .toLowerCase() !== "verified"
+  ) {
+    throw createError(
+      "BVN must be verified before approving KYC",
+      400,
+    );
+  }
+
+  if (
+    String(
+      kyc.customerVerificationStatus || "",
+    )
+      .trim()
+      .toLowerCase() !== "verified"
+  ) {
+    throw createError(
+      "Customer identity must be verified before approving KYC",
+      400,
+    );
+  }
+
+  if (
+    String(
+      kyc.faceVerificationStatus || "",
+    )
+      .trim()
+      .toLowerCase() !== "verified"
+  ) {
+    throw createError(
+      "Customer selfie must be submitted before approving KYC",
+      400,
+    );
+  }
+
+  /*
+   * ----------------------------------------------------------
+   * BORROWER
+   * ----------------------------------------------------------
+   */
+
+  const borrowerId =
+    kyc.user?._id || kyc.user;
+
+  if (!borrowerId) {
+    throw createError(
+      "KYC is not linked to a borrower",
+      400,
+    );
+  }
+
+  console.log(
+    "=================================",
+  );
+
+  console.log(
+    "🔐 ADMIN KYC APPROVAL",
+  );
+
+  console.log(
+    "KYC ID:",
+    kycId,
+  );
+
+  console.log(
+    "BORROWER:",
+    borrowerId,
+  );
+
+  console.log(
+    "=================================",
+  );
+
+  /*
+   * ----------------------------------------------------------
+   * CREATE / GET REPAYMENT ACCOUNT + PAYSTACK DVA
+   * ----------------------------------------------------------
+   *
+   * IMPORTANT:
+   *
+   * This happens BEFORE the KYC record is marked verified.
+   *
+   * getOrCreateAccountWithDva() is idempotent:
+   *
+   * - existing active DVA -> returns it
+   * - existing pending DVA -> continues/reuses provisioning
+   * - no account -> creates local account
+   * - no DVA -> requests Paystack DVA
+   *
+   * Paystack assignment itself may remain pending until
+   * dedicatedaccount.assign.success is received.
+   * ----------------------------------------------------------
+   */
+
+  let repaymentAccount;
+
+  try {
+    repaymentAccount =
+      await RepaymentAccountService.getOrCreateAccountWithDva(
+        borrowerId,
+      );
+  } catch (error) {
+    console.error(
+      "❌ REPAYMENT ACCOUNT / DVA PROVISIONING FAILED:",
+      {
+        kycId: String(kyc._id),
+
+        userId: String(borrowerId),
+
+        error: error?.message,
+
+        stack: error?.stack,
+      },
+    );
+
+    throw createError(
+      "KYC cannot be approved because the repayment account could not be provisioned",
+      400,
+    );
+  }
+
+  if (!repaymentAccount) {
+    throw createError(
+      "Repayment account could not be provisioned",
+      400,
+    );
+  }
+
+  /*
+   * ----------------------------------------------------------
+   * APPROVE KYC
+   * ----------------------------------------------------------
+   *
+   * Only reached after the repayment account/DVA request
+   * has been successfully created or retrieved.
+   * ----------------------------------------------------------
+   */
+
+  const updatedKyc =
+    await KycRepository.updateById(
+      kycId,
+      {
+        status: "verified",
+
+        rejectionReason: null,
+
+        verifiedAt:
+          new Date(),
+
+        verifiedBy:
+          adminUserId,
+      },
+    );
+
+  if (!updatedKyc) {
+    throw createError(
+      "KYC record could not be verified",
+      500,
+    );
+  }
+
+  /*
+   * ----------------------------------------------------------
+   * RESPONSE
+   * ----------------------------------------------------------
+   */
+
+  return {
+    ...updatedKyc.toObject(),
+
+    repaymentAccount: {
+      accountId:
+        repaymentAccount._id,
+
+      accountNumber:
+        repaymentAccount.accountNumber ||
+        null,
+
+      accountName:
+        repaymentAccount.accountName ||
+        null,
+
+      bankName:
+        repaymentAccount.bankName ||
+        null,
+
+      bankCode:
+        repaymentAccount.bankCode ||
+        null,
+
+      currency:
+        repaymentAccount.currency ||
+        "NGN",
+
+      status:
+        repaymentAccount.status ||
+        "active",
+
+      provider:
+        repaymentAccount.provider ||
+        "paystack",
+
+      dvaStatus:
+        repaymentAccount.dvaStatus ||
+        "pending",
+
+      providerCustomerCode:
+        repaymentAccount.providerCustomerCode ||
+        null,
+
+      providerAccountId:
+        repaymentAccount.providerAccountId ||
+        null,
+    },
+  };
+};
+
+/**
+ * Admin rejects a KYC record.
+ */
+const rejectKyc = async (
+  kycId,
+  adminUserId,
+  rejectionReason,
+) => {
+  if (!kycId) {
+    throw createError(
+      "KYC ID is required",
+      400,
+    );
+  }
+
+  if (!adminUserId) {
+    throw createError(
+      "Admin user is required",
+      401,
+    );
+  }
+
+  const reason =
+    clean(rejectionReason);
+
+  if (!reason) {
+    throw createError(
+      "Rejection reason is required",
+      400,
+    );
+  }
+
+  const kyc =
+    await KycRepository.findById(
+      kycId,
+    );
+
+  if (!kyc) {
+    throw createError(
+      "KYC record not found",
+      404,
+    );
+  }
+
+  const updatedKyc =
+    await KycRepository.updateById(
+      kycId,
+      {
+        status: "rejected",
+
+        rejectionReason:
+          reason,
+
+        verifiedAt: null,
+
+        verifiedBy:
+          adminUserId,
+      },
+    );
+
+  if (!updatedKyc) {
+    throw createError(
+      "KYC record could not be rejected",
+      500,
+    );
+  }
+
+  return updatedKyc;
+};
+
 
 /*
  * ============================================================
@@ -1285,15 +1664,18 @@ const handlePaystackCustomerIdentificationWebhook =
     };
   };
 
+
 /*
  * ============================================================
  * FACE VERIFICATION
  * ============================================================
  */
 
+
 const startFaceVerification = async (
   userId,
-  selfie,
+  selfieUrl,
+  cloudinaryPublicId = null,
 ) => {
   if (!userId) {
     throw createError(
@@ -1302,9 +1684,13 @@ const startFaceVerification = async (
     );
   }
 
-  if (!selfie) {
+  if (
+    !selfieUrl ||
+    typeof selfieUrl !== "string" ||
+    !selfieUrl.trim()
+  ) {
     throw createError(
-      "Selfie image is required",
+      "Customer selfie is required",
       400,
     );
   }
@@ -1317,163 +1703,184 @@ const startFaceVerification = async (
 
   if (!kyc) {
     throw createError(
-      "Please submit your KYC information before face verification",
+      "Please submit your KYC information before taking a selfie",
       400,
     );
   }
 
   /*
-   * Face verification should only happen after
-   * KYC and BVN/customer verification.
+   * ==========================================================
+   * REQUIRED KYC INFORMATION
+   * ==========================================================
    */
 
-  if (
-    kyc.status !==
-    "verified"
-  ) {
+  const requiredFields = [
+    kyc.firstName,
+    kyc.lastName,
+    kyc.dateOfBirth,
+    kyc.gender,
+    kyc.address,
+    kyc.city,
+    kyc.state,
+    kyc.country,
+    kyc.idType,
+    kyc.idNumber,
+  ];
+
+  const missingRequiredField =
+    requiredFields.some(
+      (value) =>
+        value === undefined ||
+        value === null ||
+        String(value).trim() === "",
+    );
+
+  if (missingRequiredField) {
     throw createError(
-      "Your KYC must be verified before face verification",
+      "Please complete your KYC information before taking a selfie",
       400,
     );
   }
+
+  /*
+   * ==========================================================
+   * BVN VERIFICATION
+   * ==========================================================
+   */
 
   if (
     kyc.bvnVerificationStatus !==
     "verified"
   ) {
     throw createError(
-      "Your BVN must be verified before face verification",
+      "Your BVN must be verified before taking a selfie",
       400,
     );
   }
+
+  /*
+   * ==========================================================
+   * CUSTOMER VERIFICATION
+   * ==========================================================
+   */
 
   if (
     kyc.customerVerificationStatus !==
     "verified"
   ) {
     throw createError(
-      "Your customer identity must be verified before face verification",
+      "Your customer identity must be verified before taking a selfie",
       400,
     );
   }
 
-  if (
-    kyc.faceVerificationStatus ===
-    "verified"
-  ) {
-    return {
-      status: "verified",
+  /*
+   * ==========================================================
+   * SAVE CLOUDINARY SELFIE
+   * ==========================================================
+   */
 
-      reference:
-        kyc.faceVerificationReference,
-    };
-  }
+  const verifiedAt =
+    new Date();
 
-  const user =
-    await User.findById(
-      userId,
-    ).select(
-      "email phone firstName lastName name",
-    );
+  const updatedKyc =
+    await KycRepository
+      .updateByUserId(
+        userId,
+        {
+          /*
+           * Cloudinary secure URL.
+           */
+          selfie:
+            selfieUrl.trim(),
 
-  if (!user) {
+          /*
+           * The selfie capture step is complete.
+           */
+          faceVerificationStatus:
+            "verified",
+
+          /*
+           * This is an upload/capture step,
+           * not external biometric verification.
+           */
+          faceVerificationProvider:
+            "cloudinary",
+
+          faceVerificationReference:
+            cloudinaryPublicId ||
+            null,
+
+          faceVerificationReason:
+            null,
+
+          faceVerifiedAt:
+            verifiedAt,
+
+          /*
+           * Store metadata only.
+           *
+           * Never store the raw image/base64
+           * inside this field.
+           */
+          faceVerificationData: {
+            provider:
+              "cloudinary",
+
+            publicId:
+              cloudinaryPublicId ||
+              null,
+
+            uploadedAt:
+              verifiedAt,
+          },
+        },
+      );
+
+  if (!updatedKyc) {
     throw createError(
-      "User not found",
-      404,
+      "KYC record could not be updated",
+      500,
     );
   }
 
-  const firstName =
-    kyc.firstName ||
-    user.firstName ||
-    clean(
-      user.name,
-    ).split(/\s+/)[0];
+  console.log(
+    "✅ CUSTOMER SELFIE SAVED",
+    {
+      userId:
+        String(userId),
 
-  const lastName =
-    kyc.lastName ||
-    user.lastName ||
-    clean(
-      user.name,
-    )
-      .split(/\s+/)
-      .slice(1)
-      .join(" ");
+      kycId:
+        String(updatedKyc._id),
 
-  if (
-    !firstName ||
-    !lastName
-  ) {
-    throw createError(
-      "Customer first name and last name are required for face verification",
-      400,
-    );
-  }
+      provider:
+        "cloudinary",
 
-  const result =
-    await SmileIdentityProvider
-      .startFaceVerification({
-        userId:
-          String(userId),
-
-        firstName,
-
-        lastName,
-
-        selfie,
-
-        callbackUrl:
-          process.env
-            .SMILE_IDENTITY_CALLBACK_URL,
-      });
-
-  if (!result?.reference) {
-    throw createError(
-      "Face verification provider did not return a verification reference",
-      502,
-    );
-  }
-
-  await KycRepository
-    .updateByUserId(
-      userId,
-      {
-        faceVerificationStatus:
-          result.status ===
-          "verified"
-            ? "verified"
-            : "pending",
-
-        faceVerificationReference:
-          result.reference,
-
-        faceVerificationReason:
-          null,
-
-        faceVerifiedAt:
-          result.status ===
-          "verified"
-            ? new Date()
-            : null,
-
-        faceVerificationProvider:
-          "smile_identity",
-
-        faceVerificationData:
-          result.providerData ||
-          null,
-      },
-    );
+      publicId:
+        cloudinaryPublicId ||
+        null,
+    },
+  );
 
   return {
     status:
-      result.status ===
-      "verified"
-        ? "verified"
-        : "pending",
+      "verified",
 
-    reference:
-      result.reference,
+    faceVerificationStatus:
+      "verified",
+
+    selfie:
+      updatedKyc.selfie,
+
+    faceVerificationReference:
+      cloudinaryPublicId ||
+      null,
+
+    faceVerificationProvider:
+      "cloudinary",
+
+    faceVerifiedAt:
+      updatedKyc.faceVerifiedAt,
   };
 };
 
@@ -1653,6 +2060,41 @@ const isKycComplete = async (
   );
 };
 
+const ensureRepaymentAccountAfterKyc = async (
+  userId,
+) => {
+  if (!userId) {
+    throw createError(
+      "User is required",
+      401,
+    );
+  }
+
+  const kycComplete =
+    await isKycComplete(userId);
+
+  if (!kycComplete) {
+    throw createError(
+      "KYC must be fully verified before creating a repayment account",
+      400,
+    );
+  }
+
+  const result =
+    await RepaymentAccountService
+      .getOrCreateAccountWithDva(
+        userId,
+      );
+
+  if (!result) {
+    throw createError(
+      "Repayment account could not be created",
+      500,
+    );
+  }
+
+  return result;
+};
 /*
  * ============================================================
  * VERIFICATION STATUS
@@ -1748,6 +2190,117 @@ const getVerificationStatus =
 
 /*
  * ============================================================
+ * REQUIRE KYC + REPAYMENT ACCOUNT BEFORE DISBURSEMENT
+ * ============================================================
+ */
+
+const requireKycAndRepaymentAccount =
+  async (userId) => {
+    if (!userId) {
+      throw createError(
+        "User is required",
+        401,
+      );
+    }
+
+    /*
+     * --------------------------------------------------------
+     * KYC MUST BE COMPLETE
+     * --------------------------------------------------------
+     */
+
+    const kycComplete =
+      await isKycComplete(userId);
+
+    if (!kycComplete) {
+      throw createError(
+        "Loan disbursement requires completed and verified KYC",
+        400,
+      );
+    }
+
+    /*
+     * --------------------------------------------------------
+     * ENSURE REPAYMENT ACCOUNT EXISTS
+     * --------------------------------------------------------
+     */
+
+    let account =
+      await RepaymentAccountService
+        .getOrCreateAccountWithDva(
+          userId,
+        );
+
+    if (!account) {
+      throw createError(
+        "Repayment account could not be created",
+        500,
+      );
+    }
+
+    /*
+     * --------------------------------------------------------
+     * DVA MUST BE ACTIVE
+     * --------------------------------------------------------
+     */
+
+    if (
+      account.status !==
+      "active"
+    ) {
+      throw createError(
+        "Repayment account is not active",
+        400,
+      );
+    }
+
+    if (
+      account.provider !==
+      "paystack"
+    ) {
+      throw createError(
+        "Repayment account is not configured for Paystack",
+        400,
+      );
+    }
+
+    if (
+      account.dvaStatus !==
+      "active"
+    ) {
+      throw createError(
+        "Repayment account is still waiting for Paystack DVA activation",
+        400,
+      );
+    }
+
+    if (
+      !account.accountNumber
+    ) {
+      throw createError(
+        "Repayment account number is not available yet",
+        400,
+      );
+    }
+
+    if (
+      !account.providerCustomerCode
+    ) {
+      throw createError(
+        "Paystack customer account is not configured",
+        400,
+      );
+    }
+
+    return {
+      kycComplete: true,
+
+      repaymentAccount:
+        account,
+    };
+  };
+/*
+ * ============================================================
  * EXPORTS
  * ============================================================
  */
@@ -1766,7 +2319,14 @@ module.exports = {
   handleFaceVerificationResult,
 
   isKycComplete,
-
+  ensureRepaymentAccountAfterKyc,
   getVerificationStatus,
+  // Admin
+  getAllKyc,
+  getKycById,
+  getPendingKyc,
+  verifyKyc,
+  requireKycAndRepaymentAccount,
+  rejectKyc,
 };
 

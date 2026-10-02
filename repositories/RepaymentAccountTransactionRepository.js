@@ -72,7 +72,8 @@ const findByIdForUser = async (
  */
 const findByProviderReference = async (
   providerReference,
-  session = null
+  provider = null,
+  session = null,
 ) => {
   if (
     !providerReference ||
@@ -81,18 +82,26 @@ const findByProviderReference = async (
     return null;
   }
 
-  const query =
-    RepaymentAccountTransaction.findOne({
-      providerReference: String(
-        providerReference
-      ).trim(),
-    });
+  const query = {
+    providerReference: String(
+      providerReference
+    ).trim(),
+  };
 
-  if (session) {
-    query.session(session);
+  if (provider) {
+    query.provider = String(provider)
+      .trim()
+      .toLowerCase();
   }
 
-  return query;
+  const mongoQuery =
+    RepaymentAccountTransaction.findOne(query);
+
+  if (session) {
+    mongoQuery.session(session);
+  }
+
+  return mongoQuery;
 };
 
 // =========================================================

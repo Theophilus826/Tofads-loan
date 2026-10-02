@@ -2,7 +2,8 @@ const express = require("express");
 
 const router = express.Router();
 
-const RepaymentAccountController = require("../controllers/RepaymentAccountController");
+const RepaymentAccountController =
+  require("../controllers/RepaymentAccountController");
 
 const {
   protect,
@@ -26,13 +27,6 @@ router.get(
   RepaymentAccountController.getBalance
 );
 
-// Initialize repayment account funding
-router.post(
-  "/repayment-account/fund",
-  protect,
-  RepaymentAccountController.fundAccount
-);
-
 // Get repayment account transactions
 router.get(
   "/repayment-account/transactions",
@@ -48,4 +42,3 @@ router.get(
 );
 
 module.exports = router;
-

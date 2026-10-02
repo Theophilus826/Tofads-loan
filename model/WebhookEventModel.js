@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const webhookEventSchema = new mongoose.Schema(
@@ -37,6 +36,17 @@ const webhookEventSchema = new mongoose.Schema(
     },
 
     // =====================================================
+    // PROVIDER REFERENCE
+    // =====================================================
+
+    providerReference: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+    },
+
+    // =====================================================
     // PROCESSING STATUS
     // =====================================================
 
@@ -49,6 +59,27 @@ const webhookEventSchema = new mongoose.Schema(
         "failed",
       ],
       default: "received",
+      required: true,
+      index: true,
+    },
+
+    // =====================================================
+    // PROCESSING ATTEMPTS
+    // =====================================================
+
+    attempts: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    // =====================================================
+    // CURRENT PROCESSING TIMESTAMP
+    // =====================================================
+
+    processingAt: {
+      type: Date,
+      default: null,
       index: true,
     },
 
@@ -62,6 +93,24 @@ const webhookEventSchema = new mongoose.Schema(
     },
 
     // =====================================================
+    // RAW WEBHOOK BODY
+    // =====================================================
+
+    rawBody: {
+      type: String,
+      default: null,
+    },
+
+    // =====================================================
+    // WEBHOOK SIGNATURE
+    // =====================================================
+
+    signature: {
+      type: String,
+      default: null,
+    },
+
+    // =====================================================
     // ERROR INFORMATION
     // =====================================================
 
@@ -70,6 +119,24 @@ const webhookEventSchema = new mongoose.Schema(
       default: null,
       trim: true,
       maxlength: 2000,
+    },
+
+    // =====================================================
+    // PROCESSING RESULT
+    // =====================================================
+
+    result: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    // =====================================================
+    // RECEIVED TIMESTAMP
+    // =====================================================
+
+    receivedAt: {
+      type: Date,
+      default: null,
     },
 
     // =====================================================
@@ -90,13 +157,10 @@ const webhookEventSchema = new mongoose.Schema(
 // IDEMPOTENCY
 // =========================================================
 //
-// A provider must not be able to create two webhook-event
-// records with the same event ID.
+// One webhook event per provider + eventId.
 //
-// This also protects against two webhook requests arriving
-// at almost exactly the same time.
-//
-// The repository catches MongoDB duplicate-key error 11000.
+// This is critical because Paystack may retry the same
+// webhook and multiple requests can arrive concurrently.
 //
 
 webhookEventSchema.index(
@@ -120,8 +184,18 @@ webhookEventSchema.index({
 });
 
 webhookEventSchema.index({
+  provider: 1,
+  processingAt: 1,
+});
+
+webhookEventSchema.index({
   eventType: 1,
   createdAt: -1,
+});
+
+webhookEventSchema.index({
+  provider: 1,
+  providerReference: 1,
 });
 
 // =========================================================
@@ -134,4 +208,3 @@ module.exports =
     "WebhookEvent",
     webhookEventSchema
   );
-

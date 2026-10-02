@@ -1,12 +1,10 @@
-
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 
 const User = require("../model/UserModel");
 
 const RepaymentAccountRepository = require("../repositories/RepaymentAccountRepository");
-const RepaymentAccountTransactionRepository =
-  require("../repositories/RepaymentAccountTransactionRepository");
+const RepaymentAccountTransactionRepository = require("../repositories/RepaymentAccountTransactionRepository");
 
 const PaymentProvider = require("../config/PaymentProvider");
 
@@ -22,29 +20,6 @@ const createError = (message, statusCode = 400) => {
 
 const roundMoney = (amount) => {
   return Math.round(Number(amount) * 100) / 100;
-};
-
-const generateFundingReference = () => {
-  return `FUND-${Date.now()}-${crypto
-    .randomBytes(4)
-    .toString("hex")
-    .toUpperCase()}`;
-};
-
-const validateAmount = (amount) => {
-  const numericAmount = roundMoney(amount);
-
-  if (
-    !Number.isFinite(numericAmount) ||
-    numericAmount <= 0
-  ) {
-    throw createError(
-      "Funding amount must be greater than zero",
-      400
-    );
-  }
-
-  return numericAmount;
 };
 
 // =========================================================
@@ -63,22 +38,14 @@ const splitCustomerName = (name) => {
 
   const parts = normalizedName.split(/\s+/);
 
-  const firstName = parts.shift() || "";
-  const lastName = parts.join(" ") || "";
-
   return {
-    firstName,
-    lastName,
+    firstName: parts.shift() || "",
+    lastName: parts.join(" ") || "",
   };
 };
 
-const getUserForPaymentProvider = async (
-  userId,
-  session = null
-) => {
-  const query = User.findById(userId).select(
-    "name email phone"
-  );
+const getUserForPaymentProvider = async (userId, session = null) => {
+  const query = User.findById(userId).select("name email phone");
 
   if (session) {
     query.session(session);
@@ -87,16 +54,13 @@ const getUserForPaymentProvider = async (
   const user = await query;
 
   if (!user) {
-    throw createError(
-      "Customer account not found",
-      404
-    );
+    throw createError("Customer account not found", 404);
   }
 
   if (!user.email) {
     throw createError(
       "Customer email is required to create a repayment virtual account",
-      400
+      400,
     );
   }
 
@@ -107,28 +71,12 @@ const getUserForPaymentProvider = async (
 // ENSURE DEDICATED VIRTUAL ACCOUNT
 // =========================================================
 
-/**
- * Ensures that the repayment account has a Paystack
- * dedicated virtual account.
- *
- * BankAccount and RepaymentAccount remain separate:
- *
- * BankAccount:
- * Customer's own external bank account.
- *
- * RepaymentAccount:
- * Dedicated virtual account used to receive repayment
- * funding.
- */
 const ensureDedicatedVirtualAccount = async (
   account,
   userId,
-  session = null
+  session = null,
 ) => {
-  // -------------------------------------------------------
-  // Already provisioned.
-  // -------------------------------------------------------
-
+  // DVA already exists
   if (
     account.accountNumber &&
     account.providerAccountId &&
@@ -137,335 +85,343 @@ const ensureDedicatedVirtualAccount = async (
     return account;
   }
 
-  const user =
-    await getUserForPaymentProvider(
-      userId,
-      session
-    );
+  const user = await getUserForPaymentProvider(userId, session);
 
-  const {
+  const { firstName, lastName } = splitCustomerName(user.name);
+
+  // -------------------------------------------------------
+  // Create/reuse Paystack customer
+  // -------------------------------------------------------
+
+  const customer = await PaymentProvider.createOrGetCustomer({
+    email: user.email,
     firstName,
     lastName,
-  } = splitCustomerName(user.name);
+    phone: user.phone || undefined,
 
-  // -------------------------------------------------------
-  // Create or reuse Paystack customer.
-  // -------------------------------------------------------
+    metadata: {
+      purpose: "loan_repayment",
+      userId: String(userId),
+      customerName: user.name || null,
+    },
+  });
 
-  const customer =
-    await PaymentProvider.createOrGetCustomer({
-      email: user.email,
-
-      firstName,
-
-      lastName,
-
-      phone: user.phone || undefined,
-
-      metadata: {
-        purpose: "loan_repayment",
-
-        userId:
-          userId.toString(),
-
-        customerName:
-          user.name || null,
-      },
-    });
-
-  if (
-    !customer ||
-    !customer.customerCode
-  ) {
+  if (!customer || !customer.customerCode) {
     throw createError(
       "Paystack customer could not be created or retrieved",
-      502
+      502,
     );
   }
 
   // -------------------------------------------------------
-  // If DVA already exists but customer code was missing,
-  // save the customer code without creating another DVA.
+  // DVA exists but customer code was missing
   // -------------------------------------------------------
 
-  if (
-    account.accountNumber &&
-    account.providerAccountId
-  ) {
-    const updatedAccount =
-      await RepaymentAccountRepository.findByIdAndUpdate(
-        account._id,
-        {
-          $set: {
-            providerCustomerCode:
-              customer.customerCode,
-          },
+  if (account.accountNumber && account.providerAccountId) {
+    const updatedAccount = await RepaymentAccountRepository.findByIdAndUpdate(
+      account._id,
+      {
+        $set: {
+          provider: "paystack",
+          providerCustomerCode: customer.customerCode,
         },
-        session
-          ? { session }
-          : {}
-      );
+      },
+      session ? { session } : {},
+    );
 
     if (!updatedAccount) {
-      throw createError(
-        "Unable to update repayment account",
-        500
-      );
+      throw createError("Unable to update repayment account", 500);
     }
 
     return updatedAccount;
   }
 
   // -------------------------------------------------------
-  // Create Paystack dedicated virtual account.
+  // Create Paystack DVA
   // -------------------------------------------------------
 
-  const dedicatedAccount =
-    await PaymentProvider.createDedicatedVirtualAccount({
-      customerCode:
-        customer.customerCode,
+  const dedicatedAccount = await PaymentProvider.createDedicatedVirtualAccount({
+    customerCode: customer.customerCode,
 
-      email:
-        user.email,
+    email: user.email,
 
-      phone:
-        user.phone || undefined,
+    phone: user.phone || undefined,
 
-      firstName,
+    firstName,
 
-      lastName,
+    lastName,
 
-      metadata: {
-        purpose:
-          "loan_repayment",
+    metadata: {
+      purpose: "loan_repayment",
 
-        userId:
-          userId.toString(),
+      userId: String(userId),
 
-        customerName:
-          user.name || null,
+      customerName: user.name || null,
 
-        repaymentAccountId:
-          account._id.toString(),
-      },
-    });
+      repaymentAccountId: String(account._id),
+    },
+  });
 
-  if (
-    !dedicatedAccount ||
-    !dedicatedAccount.accountNumber
-  ) {
-    throw createError(
-      "Paystack dedicated virtual account was not created",
-      502
-    );
-  }
+ if (!dedicatedAccount) {
+  throw createError(
+    "Paystack dedicated virtual account assignment failed",
+    502,
+  );
+}
 
   // -------------------------------------------------------
-  // Save DVA details.
+  // Save DVA
   // -------------------------------------------------------
 
   const updateData = {
-    provider: "paystack",
+  provider: "paystack",
 
-    providerCustomerCode:
-      customer.customerCode,
+  dvaStatus:
+    dedicatedAccount.dvaStatus || "pending",
 
-    providerAccountId:
-      dedicatedAccount.providerAccountId,
+  providerCustomerCode:
+    customer.customerCode,
 
-    accountNumber:
-      dedicatedAccount.accountNumber,
+  providerAccountId:
+    dedicatedAccount.providerAccountId || null,
 
-    accountName:
-      dedicatedAccount.accountName ||
-      user.name,
+  accountNumber:
+    dedicatedAccount.accountNumber || null,
 
-    bankName:
-      dedicatedAccount.bankName,
+  accountName:
+    dedicatedAccount.accountName || user.name,
 
-    currency:
-      dedicatedAccount.currency ||
-      account.currency ||
-      "NGN",
+  bankName:
+    dedicatedAccount.bankName || null,
 
-    metadata: {
-      ...(account.metadata || {}),
+  bankCode:
+    dedicatedAccount.bankCode || null,
 
-      purpose:
-        "loan_repayment",
+  currency:
+    dedicatedAccount.currency ||
+    account.currency ||
+    "NGN",
 
-      customerName:
-        user.name || null,
+  metadata: {
+    ...(account.metadata || {}),
 
-      paystackCustomer:
-        customer.providerData || null,
+    purpose: "loan_repayment",
 
-      dedicatedVirtualAccount:
-        dedicatedAccount.providerData ||
-        null,
+    customerName:
+      user.name || null,
+
+    paystackCustomer:
+      customer.providerData || null,
+
+    dedicatedVirtualAccount:
+      dedicatedAccount.providerData || null,
+  },
+};
+
+  const updatedAccount = await RepaymentAccountRepository.findByIdAndUpdate(
+    account._id,
+    {
+      $set: updateData,
     },
-  };
-
-  const updatedAccount =
-    await RepaymentAccountRepository.findByIdAndUpdate(
-      account._id,
-      {
-        $set: updateData,
-      },
-      session
-        ? { session }
-        : {}
-    );
+    session ? { session } : {},
+  );
 
   if (!updatedAccount) {
-    throw createError(
-      "Unable to save repayment virtual account",
-      500
-    );
+    throw createError("Unable to save repayment virtual account", 500);
   }
 
   return updatedAccount;
 };
 
 // =========================================================
-// GET OR CREATE ACCOUNT
+// GET OR CREATE LOCAL ACCOUNT
 // =========================================================
 
-/**
- * Get customer's repayment account.
- *
- * Creates one if the customer does not have one.
- *
- * Also provisions a Paystack dedicated virtual account
- * when one does not already exist.
- */
-const getOrCreateAccount = async (
-  userId,
-  session = null
-) => {
+const getOrCreateAccount = async (userId, session = null) => {
   if (!userId) {
-    throw createError(
-      "User ID is required",
-      400
-    );
+    throw createError("User ID is required", 400);
   }
 
-  let account =
-    await RepaymentAccountRepository.findByUserInternal(
-      userId,
-      session
-    );
-
-  // -------------------------------------------------------
-  // Existing account.
-  // -------------------------------------------------------
+  let account = await RepaymentAccountRepository.findByUserInternal(
+    userId,
+    session,
+  );
 
   if (account) {
     if (account.status !== "active") {
-      throw createError(
-        `Repayment account is ${account.status}`,
-        400
-      );
-    }
-
-    // -----------------------------------------------------
-    // Provision DVA if missing.
-    // -----------------------------------------------------
-
-    if (
-      !account.accountNumber ||
-      !account.providerAccountId ||
-      !account.providerCustomerCode
-    ) {
-      account =
-        await ensureDedicatedVirtualAccount(
-          account,
-          userId,
-          session
-        );
+      throw createError(`Repayment account is ${account.status}`, 400);
     }
 
     return account;
   }
 
-  // -------------------------------------------------------
-  // Create base repayment account.
-  // -------------------------------------------------------
+  account = await RepaymentAccountRepository.create(
+    {
+      user: userId,
 
-  account =
-    await RepaymentAccountRepository.create(
-      {
-        user: userId,
+      currency: "NGN",
 
-        currency: "NGN",
+      balance: 0,
 
-        balance: 0,
+      totalCredited: 0,
 
-        totalCredited: 0,
+      totalRepaid: 0,
 
-        totalRepaid: 0,
+      status: "active",
 
-        status: "active",
-
-        provider: "paystack",
-      },
-      session
-        ? { session }
-        : {}
-    );
-
-  // -------------------------------------------------------
-  // Provision Paystack DVA.
-  // -------------------------------------------------------
-
-  account =
-    await ensureDedicatedVirtualAccount(
-      account,
-      userId,
-      session
-    );
+      provider: "paystack",
+    },
+    session ? { session } : {},
+  );
 
   return account;
 };
 
 // =========================================================
-// GET ACCOUNT
+// GET OR CREATE ACCOUNT + DVA
 // =========================================================
 
-const getAccount = async (userId) => {
-  return getOrCreateAccount(userId);
+// =========================================================
+// GET OR CREATE ACCOUNT + DVA
+// =========================================================
+
+const getOrCreateAccountWithDva = async (userId, session = null) => {
+  if (!userId) {
+    throw createError("User ID is required", 400);
+  }
+
+  let account = await getOrCreateAccount(userId, session);
+
+  // -------------------------------------------------------
+  // Already fully provisioned
+  // -------------------------------------------------------
+
+  const hasCompleteDva =
+    account.provider === "paystack" &&
+    account.accountNumber &&
+    account.providerAccountId &&
+    account.providerCustomerCode;
+
+  if (hasCompleteDva) {
+    return account;
+  }
+
+  // -------------------------------------------------------
+  // DVA assignment already accepted by Paystack and waiting
+  // for the success webhook.
+  //
+  // IMPORTANT:
+  // Do NOT call Paystack again while pending.
+  // -------------------------------------------------------
+
+  if (
+    account.provider === "paystack" &&
+    account.dvaStatus === "pending" &&
+    account.providerCustomerCode
+  ) {
+    return account;
+  }
+
+  // -------------------------------------------------------
+  // Failed/incomplete DVA can be retried
+  // -------------------------------------------------------
+
+  return ensureDedicatedVirtualAccount(
+    account,
+    userId,
+    session,
+  );
+};
+
+// =========================================================
+// GET REPAYMENT ACCOUNT
+// =========================================================
+
+const getAccount = async (req, res, next) => {
+  try {
+    const account =
+      await RepaymentAccountService.getAccount(
+        req.user._id,
+      );
+
+    return res.status(200).json({
+      success: true,
+      message: "Repayment account retrieved successfully",
+      data: account,
+    });
+  } catch (error) {
+    return next(error);
+  }
 };
 
 // =========================================================
 // GET BALANCE
 // =========================================================
 
+/**
+ * READ ONLY.
+ *
+ * Does not:
+ * - create repayment account
+ * - create Paystack customer
+ * - create DVA
+ */
 const getBalance = async (userId) => {
-  const account =
-    await getOrCreateAccount(userId);
+  const account = await getAccount(userId);
 
   return {
-    accountId:
-      account._id,
+    accountId: account._id,
 
-    balance:
-      account.balance,
+    balance: account.balance,
 
-    currency:
-      account.currency,
+    currency: account.currency,
 
-    totalCredited:
-      account.totalCredited,
+    totalCredited: account.totalCredited,
 
-    totalRepaid:
-      account.totalRepaid,
+    totalRepaid: account.totalRepaid,
 
-    status:
-      account.status,
+    status: account.status,
 
-    // -----------------------------------------------------
-    // DVA details
-    // -----------------------------------------------------
+    accountNumber: account.accountNumber || null,
+
+    accountName: account.accountName || null,
+
+    bankName: account.bankName || null,
+
+    provider: account.provider || null,
+
+    providerCustomerCode: account.providerCustomerCode || null,
+
+    providerAccountId: account.providerAccountId || null,
+  };
+};
+
+// =========================================================
+// PROVISION REPAYMENT ACCOUNT + DVA
+// =========================================================
+
+const provisionRepaymentAccount = async (userId) => {
+  if (!userId) {
+    throw createError("User ID is required", 400);
+  }
+
+  const account =
+    await getOrCreateAccountWithDva(userId);
+
+  return {
+    accountId: account._id,
+
+    balance: account.balance,
+
+    currency: account.currency,
+
+    totalCredited: account.totalCredited,
+
+    totalRepaid: account.totalRepaid,
+
+    status: account.status,
+
+    dvaStatus: account.dvaStatus,
 
     accountNumber:
       account.accountNumber || null,
@@ -475,6 +431,9 @@ const getBalance = async (userId) => {
 
     bankName:
       account.bankName || null,
+
+    bankCode:
+      account.bankCode || null,
 
     provider:
       account.provider || null,
@@ -488,391 +447,117 @@ const getBalance = async (userId) => {
 };
 
 // =========================================================
-// INITIALIZE FUNDING
-// =========================================================
-
-/**
- * Initialize repayment-account funding.
- *
- * IMPORTANT:
- *
- * This function DOES NOT credit the account.
- *
- * The account is credited only after Paystack sends
- * a verified charge.success webhook.
- */
-const initializeFunding = async (
-  userId,
-  { amount, email }
-) => {
-  const fundingAmount =
-    validateAmount(amount);
-
-  if (!email) {
-    throw createError(
-      "Customer email is required",
-      400
-    );
-  }
-
-  const account =
-    await getOrCreateAccount(userId);
-
-  const paymentReference =
-    generateFundingReference();
-
-  // -------------------------------------------------------
-  // Create pending ledger transaction first.
-  // -------------------------------------------------------
-
-  const transaction =
-    await RepaymentAccountTransactionRepository.create(
-      {
-        repaymentAccount:
-          account._id,
-
-        user: userId,
-
-        type: "credit",
-
-        status: "pending",
-
-        amount:
-          fundingAmount,
-
-        currency:
-          account.currency || "NGN",
-
-        balanceBefore:
-          roundMoney(account.balance),
-
-        balanceAfter:
-          roundMoney(account.balance),
-
-        purpose:
-          "account_funding",
-
-        loan: null,
-
-        loanApplication: null,
-
-        repaymentSchedule: null,
-
-        repayment: null,
-
-        provider: "paystack",
-
-        providerReference:
-          paymentReference,
-
-        providerData: null,
-
-        description:
-          "Repayment account funding",
-
-        initiatedBy:
-          userId,
-
-        initiatedByRole:
-          "customer",
-      }
-    );
-
-  try {
-    // -----------------------------------------------------
-    // Initialize Paystack payment.
-    // -----------------------------------------------------
-
-    const providerResponse =
-      await PaymentProvider.initializePayment({
-        reference:
-          paymentReference,
-
-        amount:
-          fundingAmount,
-
-        currency:
-          account.currency || "NGN",
-
-        email,
-
-        metadata: {
-          transactionType:
-            "repayment_account_funding",
-
-          repaymentAccountId:
-            account._id.toString(),
-
-          userId:
-            userId.toString(),
-
-          fundingReference:
-            paymentReference,
-
-          transactionId:
-            transaction._id.toString(),
-        },
-      });
-
-    if (
-      !providerResponse ||
-      !providerResponse.reference
-    ) {
-      throw createError(
-        "Payment provider returned an invalid response",
-        502
-      );
-    }
-
-    // -----------------------------------------------------
-    // Store provider response.
-    // -----------------------------------------------------
-
-    const updatedTransaction =
-      await RepaymentAccountTransactionRepository.updateById(
-        transaction._id,
-        {
-          providerReference:
-            providerResponse.reference,
-
-          providerData:
-            providerResponse,
-        }
-      );
-
-    return {
-      transaction:
-        updatedTransaction,
-
-      payment: {
-        reference:
-          paymentReference,
-
-        providerReference:
-          providerResponse.reference,
-
-        authorizationUrl:
-          providerResponse.authorizationUrl ||
-          null,
-
-        accessCode:
-          providerResponse.accessCode ||
-          null,
-      },
-    };
-  } catch (error) {
-    await RepaymentAccountTransactionRepository.updateById(
-      transaction._id,
-      {
-        status: "failed",
-
-        failureReason:
-          error.message ||
-          "Payment initialization failed",
-
-        failedAt:
-          new Date(),
-
-        providerData: {
-          error:
-            error.message ||
-            "Payment initialization failed",
-        },
-      }
-    );
-
-    throw error;
-  }
-};
-
-// =========================================================
 // COMPLETE FUNDING
 // =========================================================
 
-const completeFunding = async ({
-  providerReference,
-  providerData,
-}) => {
-  if (
-    !providerReference ||
-    !String(providerReference).trim()
-  ) {
-    throw createError(
-      "Funding provider reference is required",
-      400
-    );
+const completeFunding = async ({ providerReference, providerData }) => {
+  if (!providerReference || !String(providerReference).trim()) {
+    throw createError("Funding provider reference is required", 400);
   }
 
-  const normalizedReference =
-    String(providerReference).trim();
+  const normalizedReference = String(providerReference).trim();
 
-  const session =
-    await mongoose.startSession();
+  const session = await mongoose.startSession();
 
   let result = null;
 
   try {
-    await session.withTransaction(
-      async () => {
-        const transaction =
-          await RepaymentAccountTransactionRepository.findByProviderReference(
-            normalizedReference,
-            session
-          );
+    await session.withTransaction(async () => {
+      const transaction =
+        await RepaymentAccountTransactionRepository.findByProviderReference(
+          normalizedReference,
+          session,
+        );
 
-        if (!transaction) {
-          throw createError(
-            "Funding transaction not found",
-            404
-          );
-        }
-
-        if (
-          transaction.purpose !==
-            "account_funding" ||
-          transaction.type !==
-            "credit"
-        ) {
-          throw createError(
-            "Provider reference does not belong to an account funding transaction",
-            400
-          );
-        }
-
-        // -------------------------------------------------
-        // IDEMPOTENCY
-        // -------------------------------------------------
-
-        if (
-          transaction.status ===
-          "successful"
-        ) {
-          result =
-            transaction;
-
-          return;
-        }
-
-        if (
-          transaction.status !==
-          "pending"
-        ) {
-          throw createError(
-            `Funding transaction cannot be completed from ${transaction.status} state`,
-            409
-          );
-        }
-
-        // -------------------------------------------------
-        // Find account inside transaction.
-        // -------------------------------------------------
-
-        const account =
-          await RepaymentAccountRepository.findByIdInternal(
-            transaction.repaymentAccount,
-            session
-          );
-
-        if (!account) {
-          throw createError(
-            "Repayment account not found",
-            404
-          );
-        }
-
-        if (
-          account.status !==
-          "active"
-        ) {
-          throw createError(
-            "Repayment account is not active",
-            400
-          );
-        }
-
-        if (
-          String(account.user) !==
-          String(transaction.user)
-        ) {
-          throw createError(
-            "Funding transaction does not belong to repayment account owner",
-            403
-          );
-        }
-
-        const amount =
-          roundMoney(
-            transaction.amount
-          );
-
-        const balanceBefore =
-          roundMoney(
-            account.balance
-          );
-
-        const balanceAfter =
-          roundMoney(
-            balanceBefore + amount
-          );
-
-        // -------------------------------------------------
-        // Credit account.
-        // -------------------------------------------------
-
-        const updatedAccount =
-          await RepaymentAccountRepository.credit(
-            account._id,
-            amount,
-            {
-              session,
-            }
-          );
-
-        if (!updatedAccount) {
-          throw createError(
-            "Unable to credit repayment account",
-            409
-          );
-        }
-
-        // -------------------------------------------------
-        // Complete ledger transaction.
-        // -------------------------------------------------
-
-        const updatedTransaction =
-          await RepaymentAccountTransactionRepository.markFundingSuccessful(
-            transaction._id,
-            {
-              balanceBefore,
-
-              balanceAfter,
-
-              providerReference:
-                normalizedReference,
-
-              providerData:
-                providerData ||
-                transaction.providerData,
-
-              processedAt:
-                new Date(),
-            },
-            {
-              session,
-            }
-          );
-
-        if (!updatedTransaction) {
-          throw createError(
-            "Funding transaction was already processed",
-            409
-          );
-        }
-
-        result =
-          updatedTransaction;
+      if (!transaction) {
+        throw createError("Funding transaction not found", 404);
       }
-    );
+
+      if (
+        transaction.purpose !== "account_funding" ||
+        transaction.type !== "credit"
+      ) {
+        throw createError(
+          "Provider reference does not belong to an account funding transaction",
+          400,
+        );
+      }
+
+      if (transaction.status === "successful") {
+        result = transaction;
+        return;
+      }
+
+      if (transaction.status !== "pending") {
+        throw createError(
+          `Funding transaction cannot be completed from ${transaction.status} state`,
+          409,
+        );
+      }
+
+      const account = await RepaymentAccountRepository.findByIdInternal(
+        transaction.repaymentAccount,
+        session,
+      );
+
+      if (!account) {
+        throw createError("Repayment account not found", 404);
+      }
+
+      if (account.status !== "active") {
+        throw createError("Repayment account is not active", 400);
+      }
+
+      if (String(account.user) !== String(transaction.user)) {
+        throw createError(
+          "Funding transaction does not belong to repayment account owner",
+          403,
+        );
+      }
+
+      const amount = roundMoney(transaction.amount);
+
+      const balanceBefore = roundMoney(account.balance);
+
+      const balanceAfter = roundMoney(balanceBefore + amount);
+
+      const updatedAccount = await RepaymentAccountRepository.credit(
+        account._id,
+        amount,
+        {
+          session,
+        },
+      );
+
+      if (!updatedAccount) {
+        throw createError("Unable to credit repayment account", 409);
+      }
+
+      const updatedTransaction =
+        await RepaymentAccountTransactionRepository.markFundingSuccessful(
+          transaction._id,
+          {
+            balanceBefore,
+
+            balanceAfter,
+
+            providerReference: normalizedReference,
+
+            providerData: providerData || transaction.providerData,
+
+            processedAt: new Date(),
+          },
+          {
+            session,
+          },
+        );
+
+      if (!updatedTransaction) {
+        throw createError("Funding transaction was already processed", 409);
+      }
+
+      result = updatedTransaction;
+    });
 
     return result;
   } finally {
@@ -889,22 +574,15 @@ const failFunding = async ({
   providerData,
   failureReason,
 }) => {
-  if (
-    !providerReference ||
-    !String(providerReference).trim()
-  ) {
-    throw createError(
-      "Funding provider reference is required",
-      400
-    );
+  if (!providerReference || !String(providerReference).trim()) {
+    throw createError("Funding provider reference is required", 400);
   }
 
-  const normalizedReference =
-    String(providerReference).trim();
+  const normalizedReference = String(providerReference).trim();
 
   const transaction =
     await RepaymentAccountTransactionRepository.findByProviderReference(
-      normalizedReference
+      normalizedReference,
     );
 
   if (!transaction) {
@@ -912,50 +590,35 @@ const failFunding = async ({
   }
 
   if (
-    transaction.purpose !==
-      "account_funding" ||
-    transaction.type !==
-      "credit"
+    transaction.purpose !== "account_funding" ||
+    transaction.type !== "credit"
   ) {
     return null;
   }
 
-  if (
-    transaction.status ===
-    "successful"
-  ) {
+  if (transaction.status === "successful") {
     return transaction;
   }
 
-  if (
-    transaction.status ===
-    "failed"
-  ) {
+  if (transaction.status === "failed") {
     return transaction;
   }
 
-  if (
-    transaction.status !==
-    "pending"
-  ) {
+  if (transaction.status !== "pending") {
     throw createError(
       `Funding transaction cannot be failed from ${transaction.status} state`,
-      409
+      409,
     );
   }
 
   return RepaymentAccountTransactionRepository.markFundingFailed(
     transaction._id,
-    failureReason ||
-      "Payment provider reported a failed transaction",
+    failureReason || "Payment provider reported a failed transaction",
     {
-      providerReference:
-        normalizedReference,
+      providerReference: normalizedReference,
 
-      providerData:
-        providerData ||
-        transaction.providerData,
-    }
+      providerData: providerData || transaction.providerData,
+    },
   );
 };
 
@@ -968,229 +631,162 @@ const reverseFunding = async ({
   providerData,
   reversalReason,
 }) => {
-  if (
-    !providerReference ||
-    !String(providerReference).trim()
-  ) {
-    throw createError(
-      "Funding provider reference is required",
-      400
-    );
+  if (!providerReference || !String(providerReference).trim()) {
+    throw createError("Funding provider reference is required", 400);
   }
 
-  const normalizedReference =
-    String(providerReference).trim();
+  const normalizedReference = String(providerReference).trim();
 
-  const session =
-    await mongoose.startSession();
+  const session = await mongoose.startSession();
 
   let result = null;
 
   try {
-    await session.withTransaction(
-      async () => {
-        const originalTransaction =
-          await RepaymentAccountTransactionRepository.findByProviderReference(
-            normalizedReference,
-            session
-          );
+    await session.withTransaction(async () => {
+      const originalTransaction =
+        await RepaymentAccountTransactionRepository.findByProviderReference(
+          normalizedReference,
+          session,
+        );
 
-        if (!originalTransaction) {
-          throw createError(
-            "Original funding transaction not found",
-            404
-          );
-        }
-
-        if (
-          originalTransaction.purpose !==
-            "account_funding" ||
-          originalTransaction.type !==
-            "credit"
-        ) {
-          throw createError(
-            "Provider reference does not belong to account funding",
-            400
-          );
-        }
-
-        if (
-          originalTransaction.status ===
-          "reversed"
-        ) {
-          result =
-            originalTransaction;
-
-          return;
-        }
-
-        if (
-          originalTransaction.status !==
-          "successful"
-        ) {
-          throw createError(
-            `Only successful funding can be reversed. Current status: ${originalTransaction.status}`,
-            409
-          );
-        }
-
-        const account =
-          await RepaymentAccountRepository.findByIdInternal(
-            originalTransaction.repaymentAccount,
-            session
-          );
-
-        if (!account) {
-          throw createError(
-            "Repayment account not found",
-            404
-          );
-        }
-
-        const amount =
-          roundMoney(
-            originalTransaction.amount
-          );
-
-        const balanceBefore =
-          roundMoney(
-            account.balance
-          );
-
-        if (
-          balanceBefore <
-          amount
-        ) {
-          throw createError(
-            "Insufficient repayment account balance for reversal",
-            409
-          );
-        }
-
-        const balanceAfter =
-          roundMoney(
-            balanceBefore - amount
-          );
-
-        const updatedAccount =
-          await RepaymentAccountRepository.debit(
-            account._id,
-            account.user,
-            amount,
-            {
-              session,
-            }
-          );
-
-        if (!updatedAccount) {
-          throw createError(
-            "Unable to reverse repayment account funding",
-            409
-          );
-        }
-
-        const updatedOriginal =
-          await RepaymentAccountTransactionRepository.markReversed(
-            originalTransaction._id,
-            reversalReason ||
-              "Provider funding reversal",
-            {
-              providerData:
-                providerData ||
-                originalTransaction.providerData,
-
-              balanceBefore,
-
-              balanceAfter,
-            },
-            {
-              session,
-            }
-          );
-
-        if (!updatedOriginal) {
-          throw createError(
-            "Funding transaction was already reversed",
-            409
-          );
-        }
-
-        const reversalTransaction =
-          await RepaymentAccountTransactionRepository.create(
-            {
-              repaymentAccount:
-                account._id,
-
-              user:
-                account.user,
-
-              type:
-                "reversal",
-
-              status:
-                "successful",
-
-              amount,
-
-              currency:
-                account.currency ||
-                originalTransaction.currency ||
-                "NGN",
-
-              balanceBefore,
-
-              balanceAfter,
-
-              purpose:
-                "repayment_reversal",
-
-              loan: null,
-
-              loanApplication: null,
-
-              repaymentSchedule: null,
-
-              repayment: null,
-
-              provider:
-                originalTransaction.provider,
-
-              providerReference:
-                `${normalizedReference}-REVERSAL`,
-
-              providerData:
-                providerData ||
-                originalTransaction.providerData,
-
-              description:
-                "Repayment account funding reversal",
-
-              initiatedBy:
-                null,
-
-              initiatedByRole:
-                "system",
-
-              processedAt:
-                new Date(),
-
-              reversalReason:
-                reversalReason ||
-                "Provider funding reversal",
-            },
-            {
-              session,
-            }
-          );
-
-        result = {
-          originalTransaction:
-            updatedOriginal,
-
-          reversalTransaction,
-        };
+      if (!originalTransaction) {
+        throw createError("Original funding transaction not found", 404);
       }
-    );
+
+      if (
+        originalTransaction.purpose !== "account_funding" ||
+        originalTransaction.type !== "credit"
+      ) {
+        throw createError(
+          "Provider reference does not belong to account funding",
+          400,
+        );
+      }
+
+      if (originalTransaction.status === "reversed") {
+        result = originalTransaction;
+
+        return;
+      }
+
+      if (originalTransaction.status !== "successful") {
+        throw createError(
+          `Only successful funding can be reversed. Current status: ${originalTransaction.status}`,
+          409,
+        );
+      }
+
+      const account = await RepaymentAccountRepository.findByIdInternal(
+        originalTransaction.repaymentAccount,
+        session,
+      );
+
+      if (!account) {
+        throw createError("Repayment account not found", 404);
+      }
+
+      const amount = roundMoney(originalTransaction.amount);
+
+      const balanceBefore = roundMoney(account.balance);
+
+      if (balanceBefore < amount) {
+        throw createError(
+          "Insufficient repayment account balance for reversal",
+          409,
+        );
+      }
+
+      const balanceAfter = roundMoney(balanceBefore - amount);
+
+      const updatedAccount = await RepaymentAccountRepository.debit(
+        account._id,
+        account.user,
+        amount,
+        {
+          session,
+        },
+      );
+
+      if (!updatedAccount) {
+        throw createError("Unable to reverse repayment account funding", 409);
+      }
+
+      const updatedOriginal =
+        await RepaymentAccountTransactionRepository.markReversed(
+          originalTransaction._id,
+          reversalReason || "Provider funding reversal",
+          {
+            providerData: providerData || originalTransaction.providerData,
+
+            balanceBefore,
+
+            balanceAfter,
+          },
+          {
+            session,
+          },
+        );
+
+      if (!updatedOriginal) {
+        throw createError("Funding transaction was already reversed", 409);
+      }
+
+      const reversalTransaction =
+        await RepaymentAccountTransactionRepository.create(
+          {
+            repaymentAccount: account._id,
+
+            user: account.user,
+
+            type: "reversal",
+
+            status: "successful",
+
+            amount,
+
+            currency: account.currency || originalTransaction.currency || "NGN",
+
+            balanceBefore,
+
+            balanceAfter,
+
+            purpose: "repayment_reversal",
+
+            loan: null,
+
+            loanApplication: null,
+
+            repaymentSchedule: null,
+
+            repayment: null,
+
+            provider: originalTransaction.provider,
+
+            providerReference: `${normalizedReference}-REVERSAL`,
+
+            providerData: providerData || originalTransaction.providerData,
+
+            description: "Repayment account funding reversal",
+
+            initiatedBy: null,
+
+            initiatedByRole: "system",
+
+            processedAt: new Date(),
+
+            reversalReason: reversalReason || "Provider funding reversal",
+          },
+          {
+            session,
+          },
+        );
+
+      result = {
+        originalTransaction: updatedOriginal,
+
+        reversalTransaction,
+      };
+    });
 
     return result;
   } finally {
@@ -1204,18 +800,9 @@ const reverseFunding = async ({
 
 const getTransactions = async (
   userId,
-  {
-    page = 1,
-    limit = 20,
-    type,
-    status,
-    purpose,
-  } = {}
+  { page = 1, limit = 20, type, status, purpose } = {},
 ) => {
-  const account =
-    await RepaymentAccountRepository.findByUser(
-      userId
-    );
+  const account = await RepaymentAccountRepository.findByUser(userId);
 
   if (!account) {
     return {
@@ -1223,220 +810,225 @@ const getTransactions = async (
 
       total: 0,
 
-      page:
-        Math.max(
-          Number(page) || 1,
-          1
-        ),
+      page: Math.max(Number(page) || 1, 1),
 
-      limit:
-        Math.min(
-          Math.max(
-            Number(limit) || 20,
-            1
-          ),
-          100
-        ),
+      limit: Math.min(Math.max(Number(limit) || 20, 1), 100),
 
       totalPages: 0,
     };
   }
 
-  return RepaymentAccountTransactionRepository.findByAccount(
-    account._id,
-    {
-      page,
-      limit,
-      type,
-      status,
-      purpose,
-    }
-  );
+  return RepaymentAccountTransactionRepository.findByAccount(account._id, {
+    page,
+    limit,
+    type,
+    status,
+    purpose,
+  });
 };
 
 // =========================================================
 // GET SINGLE TRANSACTION
 // =========================================================
 
-const getTransaction = async (
-  userId,
-  transactionId
-) => {
+const getTransaction = async (userId, transactionId) => {
   const transaction =
     await RepaymentAccountTransactionRepository.findByIdForUser(
       transactionId,
-      userId
+      userId,
     );
 
   if (!transaction) {
-    throw createError(
-      "Repayment account transaction not found",
-      404
-    );
+    throw createError("Repayment account transaction not found", 404);
   }
 
   return transaction;
 };
 
-
+// =========================================================
+// CREDIT DEDICATED VIRTUAL ACCOUNT
+// =========================================================
 
 const creditDedicatedVirtualAccount = async ({
   accountNumber,
   amount,
   providerReference,
-  providerData,
+  providerData = null,
 }) => {
-  const normalizedAccountNumber =
-    String(accountNumber || "").trim();
-
-  const normalizedProviderReference =
-    String(providerReference || "").trim();
+  const normalizedAccountNumber = String(accountNumber || "")
+    .replace(/\s/g, "")
+    .trim();
 
   if (!normalizedAccountNumber) {
     throw createError(
       "Dedicated virtual account number is required",
-      400
+      400,
     );
   }
 
-  if (!normalizedProviderReference) {
-    throw createError(
-      "Provider reference is required for DVA credit",
-      400
-    );
-  }
-
-  const numericAmount =
-    roundMoney(amount);
+  const numericAmount = Number(amount);
 
   if (
     !Number.isFinite(numericAmount) ||
     numericAmount <= 0
   ) {
     throw createError(
-      "Dedicated virtual account credit amount must be greater than zero",
-      400
+      "Credit amount must be greater than zero",
+      400,
     );
   }
 
-  const session =
-    await mongoose.startSession();
+  const creditAmount = roundMoney(numericAmount);
+
+  if (creditAmount <= 0) {
+    throw createError(
+      "Credit amount must be greater than zero",
+      400,
+    );
+  }
+
+  const normalizedReference =
+    String(providerReference || "").trim();
+
+  if (!normalizedReference) {
+    throw createError(
+      "Provider reference is required",
+      400,
+    );
+  }
+
+  const session = await mongoose.startSession();
 
   let result = null;
 
   try {
-    await session.withTransaction(
-      async () => {
-        // -------------------------------------------------
-        // FIND REPAYMENT ACCOUNT BY DVA ACCOUNT NUMBER
-        // -------------------------------------------------
+    await session.withTransaction(async () => {
+      // ---------------------------------------------------
+      // FIND ACTIVE PAYSTACK DVA
+      // ---------------------------------------------------
 
-        const account =
-          await RepaymentAccountRepository.findByAccountNumber(
+      const account =
+        await RepaymentAccountRepository
+          .findActiveByAccountNumber(
             normalizedAccountNumber,
-            session
+            session,
           );
 
-        if (!account) {
+      if (!account) {
+        throw createError(
+          "Active Paystack repayment account not found for this virtual account number",
+          404,
+        );
+      }
+
+      if (account.provider !== "paystack") {
+        throw createError(
+          "Virtual account is not managed by Paystack",
+          400,
+        );
+      }
+
+      // ---------------------------------------------------
+      // IDEMPOTENCY CHECK
+      // ---------------------------------------------------
+
+      const existingTransaction =
+        await RepaymentAccountTransactionRepository
+          .findByProviderReference(
+            normalizedReference,
+            "paystack",
+            session,
+          );
+
+      if (existingTransaction) {
+        if (
+          String(existingTransaction.repaymentAccount) !==
+          String(account._id)
+        ) {
           throw createError(
-            "Repayment account not found for dedicated virtual account",
-            404
+            "Provider reference is already associated with another repayment account",
+            409,
           );
         }
 
-        if (account.status !== "active") {
+        if (
+          existingTransaction.type !== "credit" ||
+          existingTransaction.purpose !== "account_funding"
+        ) {
           throw createError(
-            "Repayment account is not active",
-            400
+            "Provider reference is already associated with another transaction",
+            409,
           );
         }
 
-        // -------------------------------------------------
-        // IDEMPOTENCY
-        //
-        // The Paystack provider reference must only create
-        // one credit ledger transaction.
-        // -------------------------------------------------
+        result = {
+          alreadyProcessed: true,
 
-        const existingTransaction =
-          await RepaymentAccountTransactionRepository.findByProviderReference(
-            normalizedProviderReference,
-            session
-          );
+          accountId: account._id,
 
-        if (existingTransaction) {
-          result = {
-            alreadyProcessed: true,
+          transactionId:
+            existingTransaction._id,
 
-            transaction:
-              existingTransaction,
+          amount:
+            existingTransaction.amount,
 
-            account,
-          };
+          balance: account.balance,
+        };
 
-          return;
-        }
+        return;
+      }
 
-        // -------------------------------------------------
-        // BALANCE SNAPSHOT
-        // -------------------------------------------------
+      // ---------------------------------------------------
+      // BALANCE
+      // ---------------------------------------------------
 
-        const balanceBefore =
-          roundMoney(account.balance || 0);
+      const balanceBefore =
+        roundMoney(account.balance);
 
-        const balanceAfter =
-          roundMoney(
-            balanceBefore + numericAmount
-          );
+      const balanceAfter =
+        roundMoney(
+          balanceBefore + creditAmount,
+        );
 
-        // -------------------------------------------------
-        // CREDIT REPAYMENT ACCOUNT
-        // -------------------------------------------------
+      // ---------------------------------------------------
+      // CREDIT ACCOUNT
+      // ---------------------------------------------------
 
-        const updatedAccount =
-          await RepaymentAccountRepository.findByIdAndUpdate(
-            account._id,
-            {
-              $inc: {
-                balance: numericAmount,
+      const updatedAccount =
+        await RepaymentAccountRepository.credit(
+          account._id,
+          creditAmount,
+          {
+            session,
+          },
+        );
 
-                totalCredited:
-                  numericAmount,
-              },
-            },
-            {
-              session,
-            }
-          );
+      if (!updatedAccount) {
+        throw createError(
+          "Unable to credit repayment account",
+          409,
+        );
+      }
 
-        if (!updatedAccount) {
-          throw createError(
-            "Unable to credit repayment account",
-            409
-          );
-        }
+      // ---------------------------------------------------
+      // RECORD TRANSACTION
+      // ---------------------------------------------------
 
-        // -------------------------------------------------
-        // CREATE SUCCESSFUL CREDIT LEDGER
-        // -------------------------------------------------
-
+      try {
         const transaction =
           await RepaymentAccountTransactionRepository.create(
             {
-              repaymentAccount:
-                account._id,
+              repaymentAccount: account._id,
 
-              user:
-                account.user,
+              user: account.user,
 
-              type:
-                "credit",
+              type: "credit",
 
-              status:
-                "successful",
+              status: "successful",
 
-              amount:
-                numericAmount,
+              purpose: "account_funding",
+
+              amount: creditAmount,
 
               currency:
                 account.currency || "NGN",
@@ -1445,57 +1037,50 @@ const creditDedicatedVirtualAccount = async ({
 
               balanceAfter,
 
-              purpose:
-                "account_funding",
-
-              loan:
-                null,
-
-              loanApplication:
-                null,
-
-              repaymentSchedule:
-                null,
-
-              repayment:
-                null,
-
-              provider:
-                "paystack",
+              provider: "paystack",
 
               providerReference:
-                normalizedProviderReference,
+                normalizedReference,
 
-              providerData:
-                providerData || null,
+              providerData,
 
-              description:
-                "Dedicated virtual account bank transfer",
-
-              initiatedBy:
-                null,
-
-              initiatedByRole:
-                "system",
-
-              processedAt:
-                new Date(),
+              processedAt: new Date(),
             },
             {
               session,
-            }
+            },
           );
 
         result = {
           alreadyProcessed: false,
 
-          transaction,
+          accountId:
+            updatedAccount._id,
 
-          account:
-            updatedAccount,
+          transactionId:
+            transaction._id,
+
+          amount: creditAmount,
+
+          balance:
+            updatedAccount.balance,
         };
+      } catch (error) {
+        // Mongo duplicate-key protection.
+        //
+        // The transaction will roll back, so the
+        // account credit above will also be rolled back.
+
+        if (error?.code === 11000) {
+          throw createError(
+            "Provider transaction has already been processed",
+            409,
+          );
+        }
+
+        throw error;
       }
-    );
+    });
 
     return result;
   } finally {
@@ -1510,11 +1095,13 @@ const creditDedicatedVirtualAccount = async ({
 module.exports = {
   getOrCreateAccount,
 
+  getOrCreateAccountWithDva,
+
+  provisionRepaymentAccount,
+
   getAccount,
 
   getBalance,
-
-  initializeFunding,
 
   completeFunding,
 
@@ -1525,6 +1112,6 @@ module.exports = {
   getTransactions,
 
   getTransaction,
+
   creditDedicatedVirtualAccount,
 };
-

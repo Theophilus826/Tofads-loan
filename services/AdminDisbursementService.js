@@ -5,7 +5,8 @@ const LoanOfferRepository = require("../repositories/LoanOfferRepository");
 const MandateRepository = require("../repositories/MandateRepository");
 const BankAccountRepository = require("../repositories/BankAccountRepository");
 const LoanRepository = require("../repositories/LoanRepository");
-
+const KycRepository = require("../repositories/KycRepository");
+const RepaymentAccountRepository = require("../repositories/RepaymentAccountRepository");
 const {
   createRepaymentSchedule,
 } = require("../services/RepaymentScheduleService");
@@ -168,6 +169,139 @@ const resolveLoanForOffer = async (offer) => {
   return null;
 };
 
+
+// =========================================================
+// VERIFY BORROWER IS READY FOR DISBURSEMENT
+// =========================================================
+
+const verifyBorrowerReadyForDisbursement = async (borrowerId) => {
+  if (!borrowerId) {
+    throw createServiceError(
+      "Unable to determine borrower for disbursement",
+      400
+    );
+  }
+
+  const kyc = await KycRepository.findByUser(borrowerId);
+
+  if (!kyc) {
+    throw createServiceError(
+      "Borrower KYC record not found",
+      400
+    );
+  }
+
+  const kycStatus = String(kyc.status || "")
+    .trim()
+    .toLowerCase();
+
+  if (kycStatus !== "verified") {
+    throw createServiceError(
+      "Borrower KYC must be completed and verified before disbursement",
+      400
+    );
+  }
+
+  if (
+    String(kyc.bvnVerificationStatus || "")
+      .trim()
+      .toLowerCase() !== "verified"
+  ) {
+    throw createServiceError(
+      "Borrower BVN verification is not complete",
+      400
+    );
+  }
+
+  if (
+    String(kyc.customerVerificationStatus || "")
+      .trim()
+      .toLowerCase() !== "verified"
+  ) {
+    throw createServiceError(
+      "Borrower customer verification is not complete",
+      400
+    );
+  }
+
+  if (
+    String(kyc.faceVerificationStatus || "")
+      .trim()
+      .toLowerCase() !== "verified"
+  ) {
+    throw createServiceError(
+      "Borrower face verification is not complete",
+      400
+    );
+  }
+
+  const repaymentAccount =
+    await RepaymentAccountRepository.findActiveByUser(borrowerId);
+
+  if (!repaymentAccount) {
+    throw createServiceError(
+      "Borrower repayment account has not been provisioned",
+      400
+    );
+  }
+
+  if (repaymentAccount.status !== "active") {
+    throw createServiceError(
+      "Borrower repayment account is not active",
+      400
+    );
+  }
+
+  if (
+    String(repaymentAccount.provider || "")
+      .trim()
+      .toLowerCase() !== "paystack"
+  ) {
+    throw createServiceError(
+      "Borrower repayment account provider is invalid",
+      400
+    );
+  }
+
+  // Paystack DVA must have completed assignment
+  if (
+    String(repaymentAccount.dvaStatus || "")
+      .trim()
+      .toLowerCase() !== "active"
+  ) {
+    throw createServiceError(
+      "Borrower Paystack repayment account is not active yet",
+      400
+    );
+  }
+
+  if (!repaymentAccount.accountNumber) {
+    throw createServiceError(
+      "Borrower repayment account number has not been assigned yet",
+      400
+    );
+  }
+
+  if (!repaymentAccount.providerAccountId) {
+    throw createServiceError(
+      "Borrower Paystack repayment account ID is missing",
+      400
+    );
+  }
+
+  if (!repaymentAccount.providerCustomerCode) {
+    throw createServiceError(
+      "Borrower Paystack customer code is missing",
+      400
+    );
+  }
+
+  return {
+    kyc,
+    repaymentAccount,
+  };
+};
+
 // =========================================================
 // CREATE DISBURSEMENT
 // =========================================================
@@ -248,7 +382,10 @@ const createDisbursement = async (offerId, adminId) => {
   const mandate = await MandateRepository.findByLoanOffer(offer._id);
 
   if (!mandate) {
-    throw createServiceError("Mandate is required before disbursement", 400);
+    throw createServiceError(
+      "Mandate is required before disbursement",
+      400,
+    );
   }
 
   const mandateStatus = String(mandate.status || "")
@@ -256,7 +393,10 @@ const createDisbursement = async (offerId, adminId) => {
     .toLowerCase();
 
   if (mandateStatus !== "active") {
-    throw createServiceError("Mandate must be active before disbursement", 400);
+    throw createServiceError(
+      "Mandate must be active before disbursement",
+      400,
+    );
   }
 
   console.log("MANDATE:", {
@@ -268,7 +408,10 @@ const createDisbursement = async (offerId, adminId) => {
   // BORROWER
   // =======================================================
 
-  const borrower = offer.user || offer.borrower || offer.loanApplication?.user;
+  const borrower =
+    offer.user ||
+    offer.borrower ||
+    offer.loanApplication?.user;
 
   const borrowerId = borrower?._id || borrower;
 
@@ -282,11 +425,64 @@ const createDisbursement = async (offerId, adminId) => {
   console.log("BORROWER ID:", borrowerId);
 
   // =======================================================
+  // KYC + REPAYMENT ACCOUNT
+  //
+  // THIS MUST PASS BEFORE DISBURSEMENT.
+  //
+  // The helper verifies:
+  //
+  // 1. KYC exists
+  // 2. KYC is verified
+  // 3. BVN is verified
+  // 4. Customer verification is verified
+  // 5. Face verification is verified
+  // 6. Repayment account exists
+  // 7. Repayment account is active
+  // 8. Repayment account belongs to Paystack
+  //
+  // =======================================================
+
+  const {
+    kyc,
+    repaymentAccount,
+  } = await verifyBorrowerReadyForDisbursement(
+    borrowerId,
+  );
+
+  console.log("BORROWER KYC:", {
+    id: kyc?._id,
+    status: kyc?.status,
+    bvnVerificationStatus:
+      kyc?.bvnVerificationStatus,
+    customerVerificationStatus:
+      kyc?.customerVerificationStatus,
+    faceVerificationStatus:
+      kyc?.faceVerificationStatus,
+  });
+
+  console.log("REPAYMENT ACCOUNT:", {
+    id: repaymentAccount?._id,
+    status: repaymentAccount?.status,
+    provider: repaymentAccount?.provider,
+    dvaStatus: repaymentAccount?.dvaStatus,
+    accountNumber:
+      repaymentAccount?.accountNumber || null,
+    accountName:
+      repaymentAccount?.accountName || null,
+    providerCustomerCode:
+      repaymentAccount?.providerCustomerCode || null,
+    providerAccountId:
+      repaymentAccount?.providerAccountId || null,
+  });
+
+  // =======================================================
   // CURRENT VERIFIED PRIMARY BANK ACCOUNT
   // =======================================================
 
   const bankAccount =
-    await BankAccountRepository.findPrimaryForDisbursement(borrowerId);
+    await BankAccountRepository.findPrimaryForDisbursement(
+      borrowerId,
+    );
 
   if (!bankAccount) {
     throw createServiceError(
@@ -296,9 +492,14 @@ const createDisbursement = async (offerId, adminId) => {
   }
 
   if (
-    String(bankAccount.verificationStatus || "").toLowerCase() !== "verified"
+    String(bankAccount.verificationStatus || "")
+      .trim()
+      .toLowerCase() !== "verified"
   ) {
-    throw createServiceError("Bank account is not verified", 400);
+    throw createServiceError(
+      "Bank account is not verified",
+      400,
+    );
   }
 
   if (bankAccount.isPrimary !== true) {
@@ -309,11 +510,17 @@ const createDisbursement = async (offerId, adminId) => {
   }
 
   if (!bankAccount.accountNumber) {
-    throw createServiceError("Bank account number is missing", 400);
+    throw createServiceError(
+      "Bank account number is missing",
+      400,
+    );
   }
 
   if (!bankAccount.bankCode) {
-    throw createServiceError("Bank account bank code is missing", 400);
+    throw createServiceError(
+      "Bank account bank code is missing",
+      400,
+    );
   }
 
   console.log("BANK ACCOUNT:", {
@@ -338,7 +545,8 @@ const createDisbursement = async (offerId, adminId) => {
     );
   }
 
-  const loanApplicationId = loanApplication._id || loanApplication;
+  const loanApplicationId =
+    loanApplication._id || loanApplication;
 
   // =======================================================
   // LOAN
@@ -368,7 +576,10 @@ const createDisbursement = async (offerId, adminId) => {
   const amount = Number(offer.approvedAmount);
 
   if (!Number.isFinite(amount) || amount <= 0) {
-    throw createServiceError("Loan offer approved amount is invalid", 400);
+    throw createServiceError(
+      "Loan offer approved amount is invalid",
+      400,
+    );
   }
 
   // =======================================================
@@ -391,51 +602,55 @@ const createDisbursement = async (offerId, adminId) => {
     reference,
   });
 
-  const disbursement = await DisbursementRepository.create({
-    user: borrowerId,
+  const disbursement =
+    await DisbursementRepository.create({
+      user: borrowerId,
 
-    loan: loan._id,
+      loan: loan._id,
 
-    loanOffer: offer._id,
+      loanOffer: offer._id,
 
-    loanApplication: loanApplicationId,
+      loanApplication: loanApplicationId,
 
-    bankAccount: bankAccount._id,
+      bankAccount: bankAccount._id,
 
-    amount,
+      amount,
 
-    currency: "NGN",
+      currency: "NGN",
 
-    method: "paystack",
+      method: "paystack",
 
-    reference,
+      reference,
 
-    provider: process.env.PAYMENT_PROVIDER || "paystack",
+      provider:
+        process.env.PAYMENT_PROVIDER ||
+        "paystack",
 
-    providerReference: reference,
+      providerReference: reference,
 
-    providerTransferCode: null,
+      providerTransferCode: null,
 
-    providerTransferId: null,
+      providerTransferId: null,
 
-    status: "pending",
+      status: "pending",
 
-    initiatedAt: null,
+      initiatedAt: null,
 
-    completedAt: null,
+      completedAt: null,
 
-    failedAt: null,
+      failedAt: null,
 
-    failureReason: null,
+      failureReason: null,
 
-    providerData: null,
-  });
+      providerData: null,
+    });
 
   console.log("DISBURSEMENT CREATED:", {
     id: disbursement._id,
     loan: disbursement.loan,
     reference: disbursement.reference,
-    providerReference: disbursement.providerReference,
+    providerReference:
+      disbursement.providerReference,
     status: disbursement.status,
   });
 
@@ -444,10 +659,13 @@ const createDisbursement = async (offerId, adminId) => {
   // =======================================================
 
   try {
-    await DisbursementRepository.updateById(disbursement._id, {
-      status: "processing",
-      initiatedAt: new Date(),
-    });
+    await DisbursementRepository.updateById(
+      disbursement._id,
+      {
+        status: "processing",
+        initiatedAt: new Date(),
+      },
+    );
 
     // =====================================================
     // CALL PAYSTACK
@@ -463,11 +681,14 @@ const createDisbursement = async (offerId, adminId) => {
       bankAccount: {
         id: bankAccount._id,
 
-        bankCode: bankAccount.bankCode,
+        bankCode:
+          bankAccount.bankCode,
 
-        accountNumber: bankAccount.accountNumber,
+        accountNumber:
+          bankAccount.accountNumber,
 
-        accountName: bankAccount.accountName,
+        accountName:
+          bankAccount.accountName,
       },
     });
 
@@ -475,16 +696,38 @@ const createDisbursement = async (offerId, adminId) => {
     // SAFE PROVIDER LOG
     // =====================================================
 
-    console.log("DISBURSEMENT PROVIDER RESULT:", {
-      provider: result?.provider,
-      reference: result?.reference,
-      status: result?.status,
-      transferCode: result?.transfer_code || result?.transferCode || null,
-      transferId: result?.id || result?.transferId || null,
-      amount: result?.amount,
-      currency: result?.currency,
-      message: result?.message || null,
-    });
+    console.log(
+      "DISBURSEMENT PROVIDER RESULT:",
+      {
+        provider: result?.provider,
+
+        reference:
+          result?.reference,
+
+        status:
+          result?.status,
+
+        transferCode:
+          result?.transfer_code ||
+          result?.transferCode ||
+          null,
+
+        transferId:
+          result?.id ||
+          result?.transferId ||
+          null,
+
+        amount:
+          result?.amount,
+
+        currency:
+          result?.currency,
+
+        message:
+          result?.message ||
+          null,
+      },
+    );
 
     // =====================================================
     // PROVIDER REFERENCE
@@ -498,36 +741,29 @@ const createDisbursement = async (offerId, adminId) => {
 
     // =====================================================
     // TRANSFER CODE
-    // =======================================================
-    //
-    // THIS IS CRITICAL FOR OTP FINALIZATION.
-    //
-    // Paystack returns something like:
-    //
-    // TRF_7cd5mjutsk7rnobx
-    //
-    // This must be stored in:
-    //
-    // providerTransferCode
-    //
-    // Do NOT confuse this with the disbursement reference.
-    //
-    // =======================================================
+    // =====================================================
 
     const providerTransferCode =
-      result?.transfer_code || result?.transferCode || null;
+      result?.transfer_code ||
+      result?.transferCode ||
+      null;
 
     // =====================================================
     // TRANSFER ID
     // =====================================================
 
-    const providerTransferId = result?.id || result?.transferId || null;
+    const providerTransferId =
+      result?.id ||
+      result?.transferId ||
+      null;
 
     // =====================================================
     // PROVIDER STATUS
     // =====================================================
 
-    const providerStatus = String(result?.status || "")
+    const providerStatus = String(
+      result?.status || "",
+    )
       .trim()
       .toLowerCase();
 
@@ -535,13 +771,19 @@ const createDisbursement = async (offerId, adminId) => {
     // STATUS MAPPING
     // =====================================================
 
-    const isSuccessful = ["success", "successful", "completed"].includes(
-      providerStatus,
-    );
+    const isSuccessful = [
+      "success",
+      "successful",
+      "completed",
+    ].includes(providerStatus);
 
-    const isFailed = ["failed", "failure"].includes(providerStatus);
+    const isFailed = [
+      "failed",
+      "failure",
+    ].includes(providerStatus);
 
-    const isReversed = providerStatus === "reversed";
+    const isReversed =
+      providerStatus === "reversed";
 
     // =====================================================
     // LOCAL STATUS
@@ -561,41 +803,65 @@ const createDisbursement = async (offerId, adminId) => {
     // UPDATE LOCAL DISBURSEMENT
     // =====================================================
 
-    const updated = await DisbursementRepository.updateById(disbursement._id, {
-      status: localStatus,
+    const updated =
+      await DisbursementRepository.updateById(
+        disbursement._id,
+        {
+          status: localStatus,
 
-      reference,
+          reference,
 
-      providerReference,
+          providerReference,
 
-      providerTransferCode,
+          providerTransferCode,
 
-      providerTransferId,
+          providerTransferId,
 
-      providerData: result,
+          providerData: result,
 
-      completedAt: isSuccessful ? new Date() : null,
+          completedAt:
+            isSuccessful
+              ? new Date()
+              : null,
 
-      failedAt: isFailed || isReversed ? new Date() : null,
+          failedAt:
+            isFailed || isReversed
+              ? new Date()
+              : null,
 
-      failureReason:
-        isFailed || isReversed
-          ? result?.message || `Paystack transfer status: ${providerStatus}`
-          : null,
-    });
+          failureReason:
+            isFailed || isReversed
+              ? result?.message ||
+                `Paystack transfer status: ${providerStatus}`
+              : null,
+        },
+      );
 
-    console.log("DISBURSEMENT UPDATED:", {
-      id: updated?._id,
-      status: updated?.status,
-      reference: updated?.reference,
-      providerReference: updated?.providerReference,
-      providerTransferCode: updated?.providerTransferCode,
-      providerTransferId: updated?.providerTransferId,
-    });
+    console.log(
+      "DISBURSEMENT UPDATED:",
+      {
+        id: updated?._id,
 
-    // =======================================================
+        status:
+          updated?.status,
+
+        reference:
+          updated?.reference,
+
+        providerReference:
+          updated?.providerReference,
+
+        providerTransferCode:
+          updated?.providerTransferCode,
+
+        providerTransferId:
+          updated?.providerTransferId,
+      },
+    );
+
+    // =====================================================
     // SUCCESS
-    // =======================================================
+    // =====================================================
 
     if (isSuccessful) {
       await LoanRepository.updateApplicationStatus(
@@ -603,32 +869,27 @@ const createDisbursement = async (offerId, adminId) => {
         "disbursed",
       );
 
-      await createRepaymentSchedule(disbursement._id);
+      await createRepaymentSchedule(
+        disbursement._id,
+      );
     }
 
-    // =======================================================
+    // =====================================================
     // OTP / PROCESSING
-    // =======================================================
-    //
-    // If Paystack returns:
-    //
-    // status: "otp"
-    //
-    // DO NOT mark it successful.
-    //
-    // The frontend can now ask the admin for the OTP and
-    // call:
-    //
-    // POST /api/admin/disbursements/:id/finalize
-    //
-    // =======================================================
+    // =====================================================
 
     if (providerStatus === "otp") {
-      console.log("PAYSTACK TRANSFER REQUIRES OTP:", {
-        disbursementId: disbursement._id,
-        reference,
-        providerTransferCode,
-      });
+      console.log(
+        "PAYSTACK TRANSFER REQUIRES OTP:",
+        {
+          disbursementId:
+            disbursement._id,
+
+          reference,
+
+          providerTransferCode,
+        },
+      );
     }
 
     return updated;
@@ -636,39 +897,46 @@ const createDisbursement = async (offerId, adminId) => {
     // =====================================================
     // SAFE ERROR LOGGING
     // =====================================================
-    //
-    // Do NOT log the complete Axios error because it can
-    // contain Authorization headers and other sensitive data.
-    //
-    // =====================================================
 
-    console.error("INITIATE DISBURSEMENT ERROR:", {
-      status: error.response?.status || error.paystackStatus || null,
+    console.error(
+      "INITIATE DISBURSEMENT ERROR:",
+      {
+        status:
+          error.response?.status ||
+          error.paystackStatus ||
+          null,
 
-      message:
-        error.response?.data?.message ||
-        error.message ||
-        "Disbursement provider error",
+        message:
+          error.response?.data?.message ||
+          error.message ||
+          "Disbursement provider error",
 
-      code: error.response?.data?.code || error.paystackCode || null,
+        code:
+          error.response?.data?.code ||
+          error.paystackCode ||
+          null,
 
-      reference,
-    });
+        reference,
+      },
+    );
 
     // =====================================================
     // MARK LOCAL DISBURSEMENT FAILED
     // =====================================================
 
-    await DisbursementRepository.updateById(disbursement._id, {
-      status: "failed",
+    await DisbursementRepository.updateById(
+      disbursement._id,
+      {
+        status: "failed",
 
-      failureReason:
-        error.response?.data?.message ||
-        error.message ||
-        "Disbursement provider error",
+        failureReason:
+          error.response?.data?.message ||
+          error.message ||
+          "Disbursement provider error",
 
-      failedAt: new Date(),
-    });
+        failedAt: new Date(),
+      },
+    );
 
     throw error;
   }
@@ -678,156 +946,309 @@ const createDisbursement = async (offerId, adminId) => {
 // RETRY DISBURSEMENT
 // =========================================================
 
-const retryDisbursement = async (disbursementId, adminId) => {
+const retryDisbursement = async (disbursementId) => {
+  if (!disbursementId) {
+    throw createServiceError(
+      "Disbursement ID is required",
+      400,
+    );
+  }
+
   const disbursement =
-    await DisbursementRepository.findByIdInternal(disbursementId);
+    await DisbursementRepository.findById(disbursementId);
 
   if (!disbursement) {
-    throw createServiceError("Disbursement not found", 404);
+    throw createServiceError(
+      "Disbursement not found",
+      404,
+    );
   }
+
+  // ===================================================
+  // ONLY FAILED DISBURSEMENTS CAN BE RETRIED
+  // ===================================================
 
   if (disbursement.status !== "failed") {
-    throw createServiceError("Only failed disbursements can be retried", 400);
+    throw createServiceError(
+      "Only failed disbursements can be retried",
+      400,
+    );
   }
 
-  // =======================================================
-  // HISTORICAL BANK ACCOUNT
-  // =======================================================
+  // ===================================================
+  // BORROWER
+  // ===================================================
 
-  const bankAccountId =
-    disbursement.bankAccount?._id || disbursement.bankAccount;
+  const borrowerId =
+    disbursement.user?._id ||
+    disbursement.user ||
+    disbursement.borrower?._id ||
+    disbursement.borrower;
 
-  if (!bankAccountId) {
-    throw createServiceError("Disbursement bank account is missing", 400);
+  if (!borrowerId) {
+    throw createServiceError(
+      "Unable to determine borrower for disbursement retry",
+      400,
+    );
   }
 
-  const bankAccount =
-    await BankAccountRepository.findByIdForDisbursement(bankAccountId);
+  console.log(
+    "RETRY BORROWER ID:",
+    borrowerId,
+  );
 
-  if (!bankAccount) {
-    throw createServiceError("Disbursement bank account not found", 404);
+  // ===================================================
+  // KYC + REPAYMENT ACCOUNT + DVA
+  // ===================================================
+
+  const {
+    kyc,
+    repaymentAccount,
+  } =
+    await verifyBorrowerReadyForDisbursement(
+      borrowerId,
+    );
+
+  console.log("RETRY KYC READY:", {
+    id: kyc._id,
+    status: kyc.status,
+    bvnVerificationStatus:
+      kyc.bvnVerificationStatus,
+    customerVerificationStatus:
+      kyc.customerVerificationStatus,
+    faceVerificationStatus:
+      kyc.faceVerificationStatus,
+  });
+
+  console.log("RETRY REPAYMENT ACCOUNT READY:", {
+    id: repaymentAccount._id,
+    status: repaymentAccount.status,
+    provider: repaymentAccount.provider,
+    dvaStatus: repaymentAccount.dvaStatus,
+    accountNumber: repaymentAccount.accountNumber,
+    providerAccountId:
+      repaymentAccount.providerAccountId,
+    providerCustomerCode:
+      repaymentAccount.providerCustomerCode,
+  });
+
+  // ===================================================
+  // MANDATE
+  // ===================================================
+
+  const mandate =
+    await MandateRepository.findByLoanOffer(
+      disbursement.offer,
+    );
+
+  if (!mandate) {
+    throw createServiceError(
+      "Active mandate not found for disbursement retry",
+      400,
+    );
   }
 
   if (
-    String(bankAccount.verificationStatus || "").toLowerCase() !== "verified"
+    String(mandate.status || "").toLowerCase() !==
+    "active"
   ) {
     throw createServiceError(
-      "Disbursement bank account is no longer verified",
+      "Mandate must be active before disbursement retry",
       400,
     );
   }
 
-  if (!bankAccount.accountNumber) {
+  // ===================================================
+  // BANK ACCOUNT
+  // ===================================================
+
+  const bankAccount =
+    await BankAccountRepository.findPrimaryForDisbursement(
+      borrowerId,
+    );
+
+  if (!bankAccount) {
     throw createServiceError(
-      "Disbursement bank account number is missing",
+      "Verified primary bank account not found",
       400,
     );
   }
 
-  if (!bankAccount.bankCode) {
-    throw createServiceError("Disbursement bank code is missing", 400);
+  if (
+    String(bankAccount.verificationStatus || "")
+      .toLowerCase() !== "verified"
+  ) {
+    throw createServiceError(
+      "Bank account is not verified",
+      400,
+    );
   }
 
-  // =======================================================
+  if (bankAccount.isPrimary !== true) {
+    throw createServiceError(
+      "Bank account is not primary",
+      400,
+    );
+  }
+
+  // ===================================================
   // NEW REFERENCE
-  // =======================================================
+  // ===================================================
 
   const reference = generateReference();
 
-  try {
-    await DisbursementRepository.updateById(disbursement._id, {
+  console.log(
+    "NEW RETRY DISBURSEMENT REFERENCE:",
+    reference,
+  );
+
+  // ===================================================
+  // MARK AS PROCESSING
+  // ===================================================
+
+  await DisbursementRepository.findByIdAndUpdate(
+    disbursement._id,
+    {
       status: "processing",
-
-      initiatedAt: new Date(),
-
+      reference,
+      errorMessage: null,
       failureReason: null,
+      providerReference: null,
+      updatedAt: new Date(),
+    },
+  );
 
-      failedAt: null,
+  try {
+    // =================================================
+    // INITIATE PROVIDER DISBURSEMENT
+    // =================================================
 
-      // REQUIRED FIELD
-      reference,
+    const providerResult = await initiateDisbursement({
+      amount: Number(disbursement.amount),
 
-      // PROVIDER REFERENCE
-      providerReference: reference,
+      accountNumber:
+        bankAccount.accountNumber,
 
-      retryCount: Number(disbursement.retryCount || 0) + 1,
+      bankCode:
+        bankAccount.bankCode,
 
-      retryRequestedAt: new Date(),
-    });
-
-    const result = await initiateDisbursement({
-      reference,
-
-      amount: disbursement.amount,
-
-      currency: disbursement.currency,
-
-      bankAccount: {
-        id: bankAccount._id,
-
-        bankCode: bankAccount.bankCode,
-
-        accountNumber: bankAccount.accountNumber,
-
-        accountName: bankAccount.accountName,
-      },
-    });
-
-    const isSuccessful =
-      String(result?.status || "").toLowerCase() === "successful";
-
-    const providerReference = result?.reference || reference;
-
-    const providerTransferCode =
-      result?.transfer_code || result?.transferCode || null;
-
-    const providerTransferId = result?.id || null;
-
-    const updated = await DisbursementRepository.updateById(disbursement._id, {
-      status: isSuccessful ? "successful" : "processing",
+      accountName:
+        bankAccount.accountName,
 
       reference,
 
-      providerReference,
+      narration:
+        disbursement.narration ||
+        "Loan disbursement",
 
-      providerTransferCode,
-
-      providerTransferId,
-
-      providerData: result,
-
-      completedAt: isSuccessful ? new Date() : null,
+      currency:
+        disbursement.currency || "NGN",
     });
 
-    // =====================================================
-    // SUCCESS
-    // =====================================================
+    console.log(
+      "RETRY PROVIDER RESULT:",
+      providerResult,
+    );
 
-    if (isSuccessful) {
-      const loanApplicationId =
-        disbursement.loanApplication?._id || disbursement.loanApplication;
+    // =================================================
+    // MAP PROVIDER STATUS
+    // =================================================
 
-      if (loanApplicationId) {
-        await LoanRepository.updateApplicationStatus(
-          loanApplicationId,
-          "disbursed",
-        );
-      }
+    const providerStatus =
+      String(
+        providerResult?.status ||
+        providerResult?.data?.status ||
+        "",
+      ).toLowerCase();
 
-      await createRepaymentSchedule(disbursement._id);
+    let localStatus = "processing";
+
+    if (
+      [
+        "success",
+        "successful",
+        "completed",
+      ].includes(providerStatus)
+    ) {
+      localStatus = "successful";
     }
 
-    return updated;
+    if (
+      [
+        "failed",
+        "failure",
+        "reversed",
+      ].includes(providerStatus)
+    ) {
+      localStatus = "failed";
+    }
+
+    // =================================================
+    // UPDATE DISBURSEMENT
+    // =================================================
+
+    const updatedDisbursement =
+      await DisbursementRepository.findByIdAndUpdate(
+        disbursement._id,
+        {
+          status: localStatus,
+
+          providerReference:
+            providerResult?.reference ||
+            providerResult?.data?.reference ||
+            null,
+
+          providerResponse:
+            providerResult,
+
+          updatedAt: new Date(),
+        },
+      );
+
+    // =================================================
+    // SUCCESS
+    // =================================================
+
+    if (localStatus === "successful") {
+      await markDisbursementSuccessful(
+        updatedDisbursement,
+      );
+    }
+
+    // =================================================
+    // FAILURE
+    // =================================================
+
+    if (localStatus === "failed") {
+      await markDisbursementFailed(
+        updatedDisbursement,
+        providerResult,
+      );
+    }
+
+    return updatedDisbursement;
   } catch (error) {
-    console.error("RETRY DISBURSEMENT ERROR:", error);
+    console.error(
+      "RETRY DISBURSEMENT ERROR:",
+      error,
+    );
 
-    await DisbursementRepository.updateById(disbursement._id, {
-      status: "failed",
+    await DisbursementRepository.findByIdAndUpdate(
+      disbursement._id,
+      {
+        status: "failed",
 
-      failureReason: error.message || "Disbursement retry failed",
+        errorMessage:
+          error.message ||
+          "Disbursement retry failed",
 
-      failedAt: new Date(),
-    });
+        failureReason:
+          error.message ||
+          "Disbursement retry failed",
+
+        updatedAt: new Date(),
+      },
+    );
 
     throw error;
   }
@@ -867,11 +1288,8 @@ const getCreateOptions = async () => {
         existing
           ? {
               id: existing._id,
-
               status: existing.status,
-
               loan: existing.loan,
-
               reference: existing.reference,
             }
           : null,
@@ -897,7 +1315,6 @@ const getCreateOptions = async () => {
         mandate
           ? {
               id: mandate._id,
-
               status: mandate.status,
             }
           : null,
@@ -933,6 +1350,43 @@ const getCreateOptions = async () => {
       }
 
       // ===================================================
+      // KYC + REPAYMENT ACCOUNT + DVA
+      // ===================================================
+
+      let readiness;
+
+      try {
+        readiness = await verifyBorrowerReadyForDisbursement(borrowerId);
+      } catch (error) {
+        console.log(
+          "❌ SKIPPED: BORROWER NOT READY FOR DISBURSEMENT:",
+          error.message,
+        );
+
+        continue;
+      }
+
+      const { kyc, repaymentAccount } = readiness;
+
+      console.log("KYC READY:", {
+        id: kyc._id,
+        status: kyc.status,
+        bvnVerificationStatus: kyc.bvnVerificationStatus,
+        customerVerificationStatus: kyc.customerVerificationStatus,
+        faceVerificationStatus: kyc.faceVerificationStatus,
+      });
+
+      console.log("REPAYMENT ACCOUNT READY:", {
+        id: repaymentAccount._id,
+        status: repaymentAccount.status,
+        provider: repaymentAccount.provider,
+        dvaStatus: repaymentAccount.dvaStatus,
+        accountNumber: repaymentAccount.accountNumber,
+        providerAccountId: repaymentAccount.providerAccountId,
+        providerCustomerCode: repaymentAccount.providerCustomerCode,
+      });
+
+      // ===================================================
       // BANK ACCOUNT
       // ===================================================
 
@@ -944,15 +1398,10 @@ const getCreateOptions = async () => {
         bankAccount
           ? {
               id: bankAccount._id,
-
               bankName: bankAccount.bankName,
-
               accountNumber: bankAccount.accountNumber,
-
               accountName: bankAccount.accountName,
-
               verificationStatus: bankAccount.verificationStatus,
-
               isPrimary: bankAccount.isPrimary,
             }
           : null,
@@ -1058,19 +1507,76 @@ const getCreateOptions = async () => {
 
           status: mandate.status,
         },
+
+        // =================================================
+        // REPAYMENT ACCOUNT
+        // =================================================
+
+        repaymentAccount: {
+          _id: repaymentAccount._id,
+
+          accountNumber: repaymentAccount.accountNumber,
+
+          accountName: repaymentAccount.accountName,
+
+          bankName: repaymentAccount.bankName,
+
+          bankCode: repaymentAccount.bankCode,
+
+          currency: repaymentAccount.currency,
+
+          provider: repaymentAccount.provider,
+
+          providerCustomerCode:
+            repaymentAccount.providerCustomerCode,
+
+          providerAccountId:
+            repaymentAccount.providerAccountId,
+
+          dvaStatus: repaymentAccount.dvaStatus,
+        },
+
+        // =================================================
+        // KYC STATUS
+        // =================================================
+
+        kyc: {
+          _id: kyc._id,
+
+          status: kyc.status,
+
+          bvnVerificationStatus:
+            kyc.bvnVerificationStatus,
+
+          customerVerificationStatus:
+            kyc.customerVerificationStatus,
+
+          faceVerificationStatus:
+            kyc.faceVerificationStatus,
+        },
       };
 
       options.push(option);
 
-      console.log("✅ OPTION ADDED:", JSON.stringify(option, null, 2));
+      console.log(
+        "✅ OPTION ADDED:",
+        JSON.stringify(option, null, 2),
+      );
     } catch (error) {
-      console.error("CREATE OPTION ERROR FOR OFFER:", offer?._id, error);
+      console.error(
+        "CREATE OPTION ERROR FOR OFFER:",
+        offer?._id,
+        error,
+      );
 
       continue;
     }
   }
 
-  console.log("\nADMIN DISBURSEMENT OPTIONS COUNT:", options.length);
+  console.log(
+    "\nADMIN DISBURSEMENT OPTIONS COUNT:",
+    options.length,
+  );
 
   return options;
 };
@@ -2048,6 +2554,8 @@ module.exports = {
   getDisbursements,
   getDisbursement,
   getCreateOptions,
+  verifyBorrowerReadyForDisbursement,
+  resolveLoanForOffer,
   createDisbursement,
   retryDisbursement,
   finalizeDisbursementOtp,

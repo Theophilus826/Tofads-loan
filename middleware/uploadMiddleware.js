@@ -1,6 +1,9 @@
 
 const multer = require("multer");
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const {
+  CloudinaryStorage,
+} = require("multer-storage-cloudinary");
+
 const cloudinary = require("../config/Cloudinary");
 
 /* =========================================================
@@ -12,25 +15,95 @@ const storage = new CloudinaryStorage({
 
   params: async (req, file) => {
     let folder = "uploads";
+    let resourceType = "auto";
 
-    // Route files automatically by MIME type
-    if (file.mimetype.startsWith("image/")) {
-      folder = "carousel-images";
-    } else if (file.mimetype.startsWith("audio/")) {
-      folder = "chat-voice-notes";
-    } else if (file.mimetype.startsWith("video/")) {
-      folder = "videos";
+    /*
+     * =======================================================
+     * KYC CUSTOMER SELFIE
+     * =======================================================
+     *
+     * Selfies uploaded through:
+     *
+     * POST /api/kyc/face/verify
+     *
+     * with:
+     *
+     * selfie: image file
+     *
+     * are stored separately from normal application images.
+     */
+
+    if (
+      file.fieldname === "selfie" &&
+      file.mimetype.startsWith("image/")
+    ) {
+      folder = "kyc/selfies";
+      resourceType = "image";
     }
+
+    /*
+     * =======================================================
+     * NORMAL IMAGE UPLOADS
+     * =======================================================
+     */
+
+    else if (
+      file.mimetype.startsWith("image/")
+    ) {
+      folder = "carousel-images";
+      resourceType = "image";
+    }
+
+    /*
+     * =======================================================
+     * AUDIO
+     * =======================================================
+     */
+
+    else if (
+      file.mimetype.startsWith("audio/")
+    ) {
+      folder = "chat-voice-notes";
+      resourceType = "video";
+    }
+
+    /*
+     * =======================================================
+     * VIDEO
+     * =======================================================
+     */
+
+    else if (
+      file.mimetype.startsWith("video/")
+    ) {
+      folder = "videos";
+      resourceType = "video";
+    }
+
+    /*
+     * =======================================================
+     * DEFAULT
+     * =======================================================
+     */
 
     return {
       folder,
 
-      // Let Cloudinary determine the correct resource type
-      resource_type: "auto",
+      resource_type: resourceType,
 
-      // Unique Cloudinary public ID
-      public_id: `${folder}-${Date.now()}-${Math.round(
-        Math.random() * 1e9
+      /*
+       * Unique Cloudinary public ID.
+       *
+       * Example:
+       *
+       * kyc/selfies-selfie-175932...
+       */
+
+      public_id: `${folder.replace(
+        /\//g,
+        "-",
+      )}-${file.fieldname}-${Date.now()}-${Math.round(
+        Math.random() * 1e9,
       )}`,
     };
   },
@@ -40,43 +113,68 @@ const storage = new CloudinaryStorage({
    FILE FILTER
    ========================================================= */
 
-const fileFilter = (req, file, cb) => {
+const fileFilter = (
+  req,
+  file,
+  cb,
+) => {
   const allowedMimeTypes = [
-    // Images
+    // =====================================================
+    // IMAGES
+    // =====================================================
+
     "image/jpeg",
     "image/png",
     "image/webp",
 
-    // Audio
+    // =====================================================
+    // AUDIO
+    // =====================================================
+
     "audio/webm",
     "audio/mpeg",
     "audio/wav",
     "audio/ogg",
 
-    // Video
+    // =====================================================
+    // VIDEO
+    // =====================================================
+
     "video/mp4",
     "video/webm",
 
-    // Android APK
+    // =====================================================
+    // ANDROID APK
+    // =====================================================
+
     "application/vnd.android.package-archive",
     "application/octet-stream",
   ];
 
-  if (allowedMimeTypes.includes(file.mimetype)) {
+  if (
+    allowedMimeTypes.includes(
+      file.mimetype,
+    )
+  ) {
     console.log(
-      `FILE ACCEPTED: ${file.originalname} (${file.mimetype})`
+      `FILE ACCEPTED: ${file.originalname} (${file.mimetype})`,
     );
 
-    return cb(null, true);
+    return cb(
+      null,
+      true,
+    );
   }
 
   console.error(
-    `FILE REJECTED: ${file.originalname} (${file.mimetype})`
+    `FILE REJECTED: ${file.originalname} (${file.mimetype})`,
   );
 
   return cb(
-    new Error(`Unsupported file type: ${file.mimetype}`),
-    false
+    new Error(
+      `Unsupported file type: ${file.mimetype}`,
+    ),
+    false,
   );
 };
 
@@ -89,12 +187,21 @@ const upload = multer({
   fileFilter,
 
   limits: {
-    // Maximum 10MB per file
-    fileSize: 10 * 1024 * 1024,
+    /*
+     * Maximum 10MB per file.
+     */
 
-    // Prevent unexpectedly large multipart requests
+    fileSize:
+      10 * 1024 * 1024,
+
+    /*
+     * Prevent unexpectedly large
+     * multipart requests.
+     */
+
     files: 10,
   },
 });
 
 module.exports = upload;
+

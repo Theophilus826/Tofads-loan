@@ -1,7 +1,24 @@
-
 const WebhookEvent = require(
   "../model/WebhookEventModel"
 );
+
+// =========================================================
+// HELPERS
+// =========================================================
+
+const normalizeProvider = provider =>
+  provider
+    ? String(provider).trim().toLowerCase()
+    : provider;
+
+const normalizeEventId = eventId =>
+  eventId
+    ? String(eventId).trim()
+    : eventId;
+
+// How long a webhook can remain "processing" before
+// another request is allowed to recover it.
+const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
 
 // =========================================================
 // FIND BY EVENT ID
@@ -16,8 +33,8 @@ const findByEventId = async (
   }
 
   return WebhookEvent.findOne({
-    provider: String(provider).trim().toLowerCase(),
-    eventId: String(eventId).trim(),
+    provider: normalizeProvider(provider),
+    eventId: normalizeEventId(eventId),
   });
 };
 
@@ -31,18 +48,35 @@ const create = async (
   return WebhookEvent.create({
     ...data,
 
-    provider: data.provider
-      ? String(data.provider).trim().toLowerCase()
-      : data.provider,
+    provider: normalizeProvider(
+      data.provider
+    ),
 
-    eventId: data.eventId
-      ? String(data.eventId).trim()
-      : data.eventId,
+    eventId: normalizeEventId(
+      data.eventId
+    ),
+
+    status: data.status || "processing",
+
+    attempts:
+      Number(data.attempts || 0) + 1,
+
+    processingAt:
+      data.processingAt || new Date(),
   });
 };
 
 // =========================================================
 // MARK PROCESSING
+// =========================================================
+// Atomically acquires processing ownership.
+//
+// Returns null when another request is already processing
+// a fresh webhook.
+//
+// Returns the document when:
+// - webhook is new/retryable
+// - previous processing attempt is stale
 // =========================================================
 
 const markProcessing = async (
@@ -53,15 +87,56 @@ const markProcessing = async (
     return null;
   }
 
+  const normalizedProvider =
+    normalizeProvider(provider);
+
+  const normalizedEventId =
+    normalizeEventId(eventId);
+
+  const now = new Date();
+
+  const staleBefore = new Date(
+    now.getTime() -
+      PROCESSING_TIMEOUT_MS
+  );
+
   return WebhookEvent.findOneAndUpdate(
     {
-      provider: String(provider).trim().toLowerCase(),
-      eventId: String(eventId).trim(),
+      provider: normalizedProvider,
+      eventId: normalizedEventId,
+
+      $or: [
+        {
+          status: {
+            $in: [
+              "failed",
+              "processing",
+            ],
+          },
+
+          $or: [
+            {
+              status: "failed",
+            },
+            {
+              status: "processing",
+              processingAt: {
+                $lte: staleBefore,
+              },
+            },
+          ],
+        },
+      ],
     },
     {
       $set: {
         status: "processing",
+        processingAt: now,
         errorMessage: null,
+      },
+
+      $inc: {
+        attempts: 1,
       },
     },
     {
@@ -84,21 +159,30 @@ const markProcessed = async (
     return null;
   }
 
+  const setData = {
+    status: "processed",
+
+    processedAt: new Date(),
+
+    processingAt: null,
+
+    errorMessage: null,
+  };
+
+  if (update.result !== undefined) {
+    setData.result = update.result;
+  }
+
   return WebhookEvent.findOneAndUpdate(
     {
-      provider: String(provider).trim().toLowerCase(),
-      eventId: String(eventId).trim(),
+      provider:
+        normalizeProvider(provider),
+
+      eventId:
+        normalizeEventId(eventId),
     },
     {
-      $set: {
-        status: "processed",
-        processedAt: new Date(),
-        errorMessage: null,
-
-        ...(update.result !== undefined
-          ? { result: update.result }
-          : {}),
-      },
+      $set: setData,
     },
     {
       returnDocument: "after",
@@ -122,13 +206,18 @@ const markFailed = async (
 
   return WebhookEvent.findOneAndUpdate(
     {
-      provider: String(provider).trim().toLowerCase(),
-      eventId: String(eventId).trim(),
+      provider:
+        normalizeProvider(provider),
+
+      eventId:
+        normalizeEventId(eventId),
     },
     {
       $set: {
         status: "failed",
-        processedAt: new Date(),
+
+        processingAt: null,
+
         errorMessage:
           errorMessage ||
           "Webhook processing failed",

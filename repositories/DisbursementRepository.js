@@ -430,6 +430,117 @@ const updateByProviderReference = async (
 };
 
 // =========================================================
+// FIND SUCCESSFUL DISBURSEMENTS
+//
+// Used by repayment-account backfill.
+// Returns unique borrowers with successful
+// disbursements.
+// =========================================================
+
+const findSuccessfulBorrowers = async ({
+  page = 1,
+  limit = 100,
+} = {}) => {
+  const currentPage = Math.max(
+    Number(page) || 1,
+    1,
+  );
+
+  const perPage = Math.min(
+    Math.max(Number(limit) || 100, 1),
+    500,
+  );
+
+  const skip = (currentPage - 1) * perPage;
+
+  const pipeline = [
+    {
+      $match: {
+        status: "successful",
+      },
+    },
+
+    {
+      $sort: {
+        completedAt: -1,
+        createdAt: -1,
+      },
+    },
+
+    {
+      $group: {
+        _id: "$user",
+
+        disbursementId: {
+          $first: "$_id",
+        },
+
+        loan: {
+          $first: "$loan",
+        },
+
+        amount: {
+          $first: "$amount",
+        },
+
+        completedAt: {
+          $first: "$completedAt",
+        },
+      },
+    },
+
+    {
+      $sort: {
+        completedAt: -1,
+      },
+    },
+
+    {
+      $skip: skip,
+    },
+
+    {
+      $limit: perPage,
+    },
+  ];
+
+  const items =
+    await Disbursement.aggregate(pipeline);
+
+  const totalResult =
+    await Disbursement.aggregate([
+      {
+        $match: {
+          status: "successful",
+        },
+      },
+
+      {
+        $group: {
+          _id: "$user",
+        },
+      },
+
+      {
+        $count: "total",
+      },
+    ]);
+
+  const total =
+    totalResult[0]?.total || 0;
+
+  return {
+    items,
+    total,
+    page: currentPage,
+    limit: perPage,
+    totalPages: Math.ceil(
+      total / perPage,
+    ),
+  };
+};
+
+// =========================================================
 // EXPORTS
 // =========================================================
 
@@ -456,7 +567,7 @@ module.exports = {
 
   findByProviderReference,
   findByReference,
-
+  findSuccessfulBorrowers,
   updateById,
   updateByProviderReference,
 };

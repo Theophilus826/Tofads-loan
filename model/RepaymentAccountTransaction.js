@@ -1,265 +1,270 @@
 
 const mongoose = require("mongoose");
 
-const repaymentAccountTransactionSchema = new mongoose.Schema(
-  {
-    // =====================================================
-    // REPAYMENT ACCOUNT
-    // =====================================================
+const repaymentAccountTransactionSchema =
+  new mongoose.Schema(
+    {
+      // =====================================================
+      // REPAYMENT ACCOUNT
+      // =====================================================
 
-    repaymentAccount: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "RepaymentAccount",
-      required: true,
-      index: true,
+      repaymentAccount: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "RepaymentAccount",
+        required: true,
+        index: true,
+      },
+
+      // =====================================================
+      // CUSTOMER
+      // =====================================================
+
+      user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+        index: true,
+      },
+
+      // =====================================================
+      // TRANSACTION TYPE
+      // =====================================================
+
+      type: {
+        type: String,
+        enum: [
+          "credit",
+          "debit",
+          "reversal",
+          "refund",
+        ],
+        required: true,
+        index: true,
+      },
+
+      // =====================================================
+      // TRANSACTION STATUS
+      // =====================================================
+
+      status: {
+        type: String,
+        enum: [
+          "pending",
+          "successful",
+          "failed",
+          "reversed",
+        ],
+        default: "successful",
+        required: true,
+        index: true,
+      },
+
+      // =====================================================
+      // AMOUNT
+      // =====================================================
+
+      amount: {
+        type: Number,
+        required: true,
+        min: 0.01,
+      },
+
+      currency: {
+        type: String,
+        default: "NGN",
+        uppercase: true,
+        trim: true,
+        required: true,
+      },
+
+      // =====================================================
+      // BALANCE SNAPSHOT
+      // =====================================================
+
+      balanceBefore: {
+        type: Number,
+        required: true,
+        min: 0,
+      },
+
+      balanceAfter: {
+        type: Number,
+        required: true,
+        min: 0,
+      },
+
+      // =====================================================
+      // TRANSACTION PURPOSE
+      // =====================================================
+
+      purpose: {
+        type: String,
+        enum: [
+          "account_funding",
+          "loan_repayment",
+          "repayment_reversal",
+          "refund",
+          "manual_adjustment",
+        ],
+        required: true,
+        index: true,
+      },
+
+      // =====================================================
+      // LOAN
+      // =====================================================
+
+      loan: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Loan",
+        default: null,
+        index: true,
+      },
+
+      // =====================================================
+      // LOAN APPLICATION
+      // =====================================================
+
+      loanApplication: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "LoanApplication",
+        default: null,
+        index: true,
+      },
+
+      // =====================================================
+      // REPAYMENT SCHEDULE
+      // =====================================================
+
+      repaymentSchedule: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "RepaymentSchedule",
+        default: null,
+        index: true,
+      },
+
+      // =====================================================
+      // REPAYMENT
+      // =====================================================
+
+      repayment: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Repayment",
+        default: null,
+        index: true,
+      },
+
+      // =====================================================
+      // PAYMENT PROVIDER
+      // =====================================================
+
+      provider: {
+        type: String,
+        default: null,
+        trim: true,
+        lowercase: true,
+        index: true,
+      },
+
+      // =====================================================
+      // PROVIDER REFERENCE
+      // =====================================================
+
+      providerReference: {
+        type: String,
+        default: null,
+        trim: true,
+        index: true,
+      },
+
+      // =====================================================
+      // PROVIDER DATA
+      // =====================================================
+
+      providerData: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null,
+      },
+
+      // =====================================================
+      // DESCRIPTION
+      // =====================================================
+
+      description: {
+        type: String,
+        default: null,
+        trim: true,
+        maxlength: 500,
+      },
+
+      // =====================================================
+      // FAILURE INFORMATION
+      // =====================================================
+
+      failureReason: {
+        type: String,
+        default: null,
+        trim: true,
+        maxlength: 500,
+      },
+
+      // =====================================================
+      // REVERSAL INFORMATION
+      // =====================================================
+
+      reversalReason: {
+        type: String,
+        default: null,
+        trim: true,
+        maxlength: 500,
+      },
+
+      // =====================================================
+      // STATUS DATES
+      // =====================================================
+
+      processedAt: {
+        type: Date,
+        default: null,
+        index: true,
+      },
+
+      failedAt: {
+        type: Date,
+        default: null,
+      },
+
+      reversedAt: {
+        type: Date,
+        default: null,
+      },
+
+      // =====================================================
+      // INITIATED BY
+      // =====================================================
+
+      initiatedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+        index: true,
+      },
+
+      initiatedByRole: {
+        type: String,
+        enum: [
+          "customer",
+          "admin",
+          "finance",
+          "system",
+        ],
+        default: null,
+      },
     },
-
-    // =====================================================
-    // CUSTOMER
-    // =====================================================
-
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-      index: true,
-    },
-
-    // =====================================================
-    // TRANSACTION TYPE
-    // =====================================================
-
-    type: {
-      type: String,
-      enum: [
-        "credit",
-        "debit",
-        "reversal",
-        "refund",
-      ],
-      required: true,
-      index: true,
-    },
-
-    // =====================================================
-    // TRANSACTION STATUS
-    // =====================================================
-
-    status: {
-      type: String,
-      enum: [
-        "pending",
-        "successful",
-        "failed",
-        "reversed",
-      ],
-      default: "successful",
-      required: true,
-      index: true,
-    },
-
-    // =====================================================
-    // AMOUNT
-    // =====================================================
-
-    amount: {
-      type: Number,
-      required: true,
-      min: 0.01,
-    },
-
-    currency: {
-      type: String,
-      default: "NGN",
-      uppercase: true,
-      trim: true,
-      required: true,
-    },
-
-    // =====================================================
-    // BALANCE SNAPSHOT
-    // =====================================================
-
-    balanceBefore: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-
-    balanceAfter: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-
-    // =====================================================
-    // TRANSACTION PURPOSE
-    // =====================================================
-
-    purpose: {
-      type: String,
-      enum: [
-        "account_funding",
-        "loan_repayment",
-        "repayment_reversal",
-        "refund",
-        "manual_adjustment",
-      ],
-      required: true,
-      index: true,
-    },
-
-    // =====================================================
-    // LOAN
-    // =====================================================
-
-    loan: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Loan",
-      default: null,
-      index: true,
-    },
-
-    // =====================================================
-    // LOAN APPLICATION
-    // =====================================================
-
-    loanApplication: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "LoanApplication",
-      default: null,
-      index: true,
-    },
-
-    // =====================================================
-    // REPAYMENT SCHEDULE
-    // =====================================================
-
-    repaymentSchedule: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "RepaymentSchedule",
-      default: null,
-      index: true,
-    },
-
-    // =====================================================
-    // REPAYMENT
-    // =====================================================
-
-    repayment: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Repayment",
-      default: null,
-      index: true,
-    },
-
-    // =====================================================
-    // PAYMENT PROVIDER
-    // =====================================================
-
-    provider: {
-      type: String,
-      default: null,
-      trim: true,
-      lowercase: true,
-      index: true,
-    },
-
-    // =====================================================
-    // PROVIDER REFERENCE
-    // =====================================================
-
-    providerReference: {
-      type: String,
-      default: null,
-      trim: true,
-      index: true,
-    },
-
-    // =====================================================
-    // PROVIDER DATA
-    // =====================================================
-
-    providerData: {
-      type: mongoose.Schema.Types.Mixed,
-      default: null,
-    },
-
-    // =====================================================
-    // DESCRIPTION
-    // =====================================================
-
-    description: {
-      type: String,
-      default: null,
-      trim: true,
-      maxlength: 500,
-    },
-
-    // =====================================================
-    // FAILURE / REVERSAL INFORMATION
-    // =====================================================
-
-    failureReason: {
-      type: String,
-      default: null,
-      trim: true,
-      maxlength: 500,
-    },
-
-    reversalReason: {
-      type: String,
-      default: null,
-      trim: true,
-      maxlength: 500,
-    },
-
-    // =====================================================
-    // STATUS DATES
-    // =====================================================
-
-    processedAt: {
-      type: Date,
-      default: null,
-      index: true,
-    },
-
-    failedAt: {
-      type: Date,
-      default: null,
-    },
-
-    reversedAt: {
-      type: Date,
-      default: null,
-    },
-
-    // =====================================================
-    // INITIATED BY
-    // =====================================================
-
-    initiatedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
-      index: true,
-    },
-
-    initiatedByRole: {
-      type: String,
-      enum: [
-        "customer",
-        "admin",
-        "finance",
-        "system",
-      ],
-      default: null,
-    },
-  },
-  {
-    timestamps: true,
-  }
-);
+    {
+      timestamps: true,
+    }
+  );
 
 // =========================================================
 // INDEXES
@@ -325,19 +330,20 @@ repaymentAccountTransactionSchema.index({
 // PROVIDER IDEMPOTENCY
 // =========================================================
 //
-// Prevents the same provider transaction from being recorded
-// more than once.
+// Prevents duplicate provider transactions.
 //
 // Example:
 //
-// provider = "paystack"
-// providerReference = "TXN_123456"
+// provider:
+//   "paystack"
 //
-// A repeated webhook with the same provider/reference pair
-// will not create another transaction.
+// providerReference:
+//   "TXN_123456"
 //
-// sparse: true allows documents without provider/reference
-// values to coexist.
+// The same Paystack reference cannot be recorded twice.
+//
+// sparse: true allows transactions without provider
+// references, such as internal/manual transactions.
 //
 // =========================================================
 
@@ -363,9 +369,11 @@ repaymentAccountTransactionSchema.pre(
     // AMOUNT
     // =====================================================
 
+    const numericAmount = Number(this.amount);
+
     if (
-      !Number.isFinite(Number(this.amount)) ||
-      Number(this.amount) <= 0
+      !Number.isFinite(numericAmount) ||
+      numericAmount <= 0
     ) {
       return next(
         new Error(
@@ -378,9 +386,12 @@ repaymentAccountTransactionSchema.pre(
     // BALANCE BEFORE
     // =====================================================
 
+    const numericBalanceBefore =
+      Number(this.balanceBefore);
+
     if (
-      !Number.isFinite(Number(this.balanceBefore)) ||
-      Number(this.balanceBefore) < 0
+      !Number.isFinite(numericBalanceBefore) ||
+      numericBalanceBefore < 0
     ) {
       return next(
         new Error("Invalid balanceBefore")
@@ -391,9 +402,12 @@ repaymentAccountTransactionSchema.pre(
     // BALANCE AFTER
     // =====================================================
 
+    const numericBalanceAfter =
+      Number(this.balanceAfter);
+
     if (
-      !Number.isFinite(Number(this.balanceAfter)) ||
-      Number(this.balanceAfter) < 0
+      !Number.isFinite(numericBalanceAfter) ||
+      numericBalanceAfter < 0
     ) {
       return next(
         new Error("Invalid balanceAfter")
@@ -407,8 +421,10 @@ repaymentAccountTransactionSchema.pre(
     // Account funding must:
     //
     // - be a credit
-    // - not be linked to a repayment
+    // - not reference a repayment
+    // - not reference a loan repayment
     //
+    // =====================================================
 
     if (this.purpose === "account_funding") {
       if (this.type !== "credit") {
@@ -437,6 +453,7 @@ repaymentAccountTransactionSchema.pre(
     // - be a debit
     // - reference a repayment
     //
+    // =====================================================
 
     if (this.purpose === "loan_repayment") {
       if (this.type !== "debit") {
@@ -459,12 +476,6 @@ repaymentAccountTransactionSchema.pre(
     // =====================================================
     // REPAYMENT REVERSAL
     // =====================================================
-    //
-    // Repayment reversal must:
-    //
-    // - use reversal transaction type
-    // - reference a repayment
-    //
 
     if (this.purpose === "repayment_reversal") {
       if (this.type !== "reversal") {
@@ -487,12 +498,6 @@ repaymentAccountTransactionSchema.pre(
     // =====================================================
     // REFUND
     // =====================================================
-    //
-    // Refund must:
-    //
-    // - reference a repayment
-    // - use either refund or credit transaction type
-    //
 
     if (this.purpose === "refund") {
       if (!this.repayment) {
@@ -564,4 +569,6 @@ const RepaymentAccountTransaction =
 // EXPORT
 // =========================================================
 
-module.exports = RepaymentAccountTransaction;
+module.exports =
+  RepaymentAccountTransaction;
+
