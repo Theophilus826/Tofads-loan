@@ -559,6 +559,10 @@ const createOrGetCustomer = async ({
 // GET AVAILABLE DVA PROVIDERS
 // =========================================================
 
+// =========================================================
+// GET AVAILABLE DVA PROVIDERS
+// =========================================================
+
 const getDedicatedAccountProviders = async () => {
   try {
     const response = await paystack.get(
@@ -568,6 +572,11 @@ const getDedicatedAccountProviders = async () => {
     const providers = Array.isArray(response.data?.data)
       ? response.data.data
       : [];
+
+    console.log(
+      "🏦 PAYSTACK AVAILABLE DVA PROVIDERS:",
+      JSON.stringify(providers, null, 2),
+    );
 
     if (providers.length === 0) {
       throw new Error(
@@ -584,6 +593,234 @@ const getDedicatedAccountProviders = async () => {
   }
 };
 
+// =========================================================
+// CREATE / ASSIGN PAYSTACK DEDICATED VIRTUAL ACCOUNT
+// =========================================================
+//
+// Paystack requires a provider for DVA assignment.
+//
+// We:
+// 1. Get currently available providers.
+// 2. Try each provider.
+// 3. Send provider_slug as preferred_bank.
+// 4. Stop when Paystack accepts the assignment.
+//
+// Assignment itself is asynchronous.
+// The final active account comes through:
+// dedicatedaccount.assign.success
+// =========================================================
+
+// =========================================================
+// CREATE / ASSIGN PAYSTACK DEDICATED VIRTUAL ACCOUNT
+// =========================================================
+
+const createDedicatedVirtualAccount = async ({
+  customerCode,
+  preferredBank,
+  phone,
+  firstName,
+  lastName,
+  email,
+  metadata = {},
+}) => {
+  if (!customerCode) {
+    throw new Error("Paystack customer code is required");
+  }
+
+  try {
+    // =======================================================
+    // GET AVAILABLE PROVIDERS
+    // =======================================================
+
+    const providers =
+      await getDedicatedAccountProviders();
+
+    if (!Array.isArray(providers) || providers.length === 0) {
+      throw new Error(
+        "No Paystack dedicated virtual account providers are available",
+      );
+    }
+
+    // =======================================================
+    // FIND PROVIDER
+    // =======================================================
+
+    let selectedProvider = null;
+
+    // If a provider was explicitly supplied,
+    // use it when available.
+    if (preferredBank) {
+      const normalizedPreferredBank =
+        String(preferredBank)
+          .trim()
+          .toLowerCase();
+
+      selectedProvider = providers.find(
+        (provider) => {
+          const slug =
+            provider?.provider_slug ||
+            provider?.slug ||
+            provider?.code ||
+            "";
+
+          return (
+            String(slug)
+              .trim()
+              .toLowerCase() ===
+            normalizedPreferredBank
+          );
+        },
+      );
+    }
+
+    // Otherwise automatically use the first
+    // available provider.
+    if (!selectedProvider) {
+      selectedProvider = providers.find(
+        (provider) =>
+          provider?.provider_slug ||
+          provider?.slug ||
+          provider?.code,
+      );
+    }
+
+    if (!selectedProvider) {
+      throw new Error(
+        "No usable Paystack dedicated account provider was returned",
+      );
+    }
+
+    // =======================================================
+    // PROVIDER SLUG
+    // =======================================================
+
+    const providerSlug =
+      selectedProvider.provider_slug ||
+      selectedProvider.slug ||
+      selectedProvider.code;
+
+    console.log(
+      "🏦 PAYSTACK DVA PROVIDER SELECTED:",
+      providerSlug,
+    );
+
+    // =======================================================
+    // ASSIGN DVA
+    // =======================================================
+
+    const payload = {
+      customer: customerCode,
+
+      preferred_bank: providerSlug,
+
+      ...(phone && {
+        phone,
+      }),
+
+      ...(firstName && {
+        first_name: firstName,
+      }),
+
+      ...(lastName && {
+        last_name: lastName,
+      }),
+
+      ...(email && {
+        email,
+      }),
+
+      ...(Object.keys(metadata).length > 0 && {
+        metadata,
+      }),
+    };
+
+    console.log(
+      "📤 PAYSTACK DVA ASSIGN REQUEST:",
+      JSON.stringify(payload, null, 2),
+    );
+
+    const response = await paystack.post(
+      "/dedicated_account/assign",
+      payload,
+    );
+
+    const data =
+      response.data?.data || null;
+
+    if (!data) {
+      throw new Error(
+        "Paystack did not return dedicated virtual account data",
+      );
+    }
+
+    console.log(
+      "✅ PAYSTACK DVA ASSIGNMENT REQUEST ACCEPTED",
+    );
+
+    console.log(
+      "🏦 PAYSTACK DVA RESPONSE:",
+      JSON.stringify(data, null, 2),
+    );
+
+    // =======================================================
+    // RETURN NORMALIZED DVA
+    // =======================================================
+
+    return {
+      provider: "paystack",
+
+      status: "pending",
+
+      dvaStatus: "pending",
+
+      assigned:
+        Boolean(data.assigned),
+
+      providerAccountId:
+        data.id || null,
+
+      accountNumber:
+        data.account_number || null,
+
+      accountName:
+        data.account_name || null,
+
+      bankName:
+        data.bank?.name || null,
+
+      bankCode:
+        data.bank?.code || null,
+
+      bankSlug:
+        data.bank?.slug ||
+        providerSlug ||
+        null,
+
+      currency:
+        data.currency || "NGN",
+
+      customerCode:
+        data.customer?.customer_code ||
+        data.customer_code ||
+        customerCode,
+
+      providerData:
+        data,
+    };
+  } catch (error) {
+    console.error(
+      "❌ PAYSTACK DVA ASSIGNMENT FAILED:",
+      error?.response?.data ||
+        error?.providerData ||
+        error?.message,
+    );
+
+    throw normalizePaystackError(
+      error,
+      "Unable to assign Paystack dedicated virtual account",
+    );
+  }
+};
 
 
 // =========================================================
@@ -1289,7 +1526,7 @@ module.exports = {
   initializePayment,
   verifyTransaction,
   chargeAuthorization,
-
+  createDedicatedVirtualAccount,
   createTransferRecipient,
   initiateTransfer,
 

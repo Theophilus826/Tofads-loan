@@ -76,7 +76,10 @@ const ensureDedicatedVirtualAccount = async (
   userId,
   session = null,
 ) => {
-  // DVA already exists
+  // -------------------------------------------------------
+  // DVA already fully exists
+  // -------------------------------------------------------
+
   if (
     account.accountNumber &&
     account.providerAccountId &&
@@ -85,28 +88,43 @@ const ensureDedicatedVirtualAccount = async (
     return account;
   }
 
-  const user = await getUserForPaymentProvider(userId, session);
+  const user = await getUserForPaymentProvider(
+    userId,
+    session,
+  );
 
-  const { firstName, lastName } = splitCustomerName(user.name);
+  const { firstName, lastName } =
+    splitCustomerName(user.name);
 
   // -------------------------------------------------------
-  // Create/reuse Paystack customer
+  // CREATE / REUSE PAYSTACK CUSTOMER
   // -------------------------------------------------------
 
-  const customer = await PaymentProvider.createOrGetCustomer({
-    email: user.email,
-    firstName,
-    lastName,
-    phone: user.phone || undefined,
+  const customer =
+    await PaymentProvider.createOrGetCustomer({
+      email: user.email,
 
-    metadata: {
-      purpose: "loan_repayment",
-      userId: String(userId),
-      customerName: user.name || null,
-    },
-  });
+      firstName,
 
-  if (!customer || !customer.customerCode) {
+      lastName,
+
+      phone:
+        user.phone || undefined,
+
+      metadata: {
+        purpose: "loan_repayment",
+
+        userId: String(userId),
+
+        customerName:
+          user.name || null,
+      },
+    });
+
+  if (
+    !customer ||
+    !customer.customerCode
+  ) {
     throw createError(
       "Paystack customer could not be created or retrieved",
       502,
@@ -114,120 +132,158 @@ const ensureDedicatedVirtualAccount = async (
   }
 
   // -------------------------------------------------------
-  // DVA exists but customer code was missing
+  // DVA EXISTS BUT CUSTOMER CODE WAS MISSING
   // -------------------------------------------------------
 
-  if (account.accountNumber && account.providerAccountId) {
-    const updatedAccount = await RepaymentAccountRepository.findByIdAndUpdate(
-      account._id,
-      {
-        $set: {
-          provider: "paystack",
-          providerCustomerCode: customer.customerCode,
+  if (
+    account.accountNumber &&
+    account.providerAccountId
+  ) {
+    const updatedAccount =
+      await RepaymentAccountRepository.findByIdAndUpdate(
+        account._id,
+
+        {
+          $set: {
+            provider: "paystack",
+
+            providerCustomerCode:
+              customer.customerCode,
+          },
         },
-      },
-      session ? { session } : {},
-    );
+
+        session
+          ? { session }
+          : {},
+      );
 
     if (!updatedAccount) {
-      throw createError("Unable to update repayment account", 500);
+      throw createError(
+        "Unable to update repayment account",
+        500,
+      );
     }
 
     return updatedAccount;
   }
 
   // -------------------------------------------------------
-  // Create Paystack DVA
+  // CREATE PAYSTACK DVA
   // -------------------------------------------------------
 
-  const dedicatedAccount = await PaymentProvider.createDedicatedVirtualAccount({
-    customerCode: customer.customerCode,
+  const dedicatedAccount =
+    await PaymentProvider.createDedicatedVirtualAccount({
+      customerCode:
+        customer.customerCode,
 
-    email: user.email,
+      email:
+        user.email,
 
-    phone: user.phone || undefined,
+      phone:
+        user.phone || undefined,
 
-    firstName,
+      firstName,
 
-    lastName,
+      lastName,
 
-    metadata: {
-      purpose: "loan_repayment",
+      metadata: {
+        purpose: "loan_repayment",
 
-      userId: String(userId),
+        userId:
+          String(userId),
 
-      customerName: user.name || null,
+        customerName:
+          user.name || null,
 
-      repaymentAccountId: String(account._id),
-    },
-  });
+        repaymentAccountId:
+          String(account._id),
+      },
+    });
 
- if (!dedicatedAccount) {
-  throw createError(
-    "Paystack dedicated virtual account assignment failed",
-    502,
-  );
-}
+  if (!dedicatedAccount) {
+    throw createError(
+      "Paystack dedicated virtual account assignment failed",
+      502,
+    );
+  }
 
   // -------------------------------------------------------
-  // Save DVA
+  // SAVE DVA
   // -------------------------------------------------------
 
   const updateData = {
-  provider: "paystack",
+    provider: "paystack",
 
-  dvaStatus:
-    dedicatedAccount.dvaStatus || "pending",
+    dvaStatus:
+      dedicatedAccount.dvaStatus ||
+      "pending",
 
-  providerCustomerCode:
-    customer.customerCode,
+    providerCustomerCode:
+      customer.customerCode,
 
-  providerAccountId:
-    dedicatedAccount.providerAccountId || null,
+    providerAccountId:
+      dedicatedAccount.providerAccountId ||
+      null,
 
-  accountNumber:
-    dedicatedAccount.accountNumber || null,
+    accountNumber:
+      dedicatedAccount.accountNumber ||
+      null,
 
-  accountName:
-    dedicatedAccount.accountName || user.name,
+    accountName:
+      dedicatedAccount.accountName ||
+      user.name ||
+      null,
 
-  bankName:
-    dedicatedAccount.bankName || null,
+    bankName:
+      dedicatedAccount.bankName ||
+      null,
 
-  bankCode:
-    dedicatedAccount.bankCode || null,
+    bankCode:
+      dedicatedAccount.bankCode ||
+      null,
 
-  currency:
-    dedicatedAccount.currency ||
-    account.currency ||
-    "NGN",
+    currency:
+      dedicatedAccount.currency ||
+      account.currency ||
+      "NGN",
 
-  metadata: {
-    ...(account.metadata || {}),
+    metadata: {
+      ...(account.metadata || {}),
 
-    purpose: "loan_repayment",
+      purpose:
+        "loan_repayment",
 
-    customerName:
-      user.name || null,
+      customerName:
+        user.name || null,
 
-    paystackCustomer:
-      customer.providerData || null,
+      paystackCustomer:
+        customer.providerData ||
+        null,
 
-    dedicatedVirtualAccount:
-      dedicatedAccount.providerData || null,
-  },
-};
-
-  const updatedAccount = await RepaymentAccountRepository.findByIdAndUpdate(
-    account._id,
-    {
-      $set: updateData,
+      dedicatedVirtualAccount:
+        dedicatedAccount.providerData ||
+        null,
     },
-    session ? { session } : {},
-  );
+  };
+
+  const updatedAccount =
+    await RepaymentAccountRepository.findByIdAndUpdate(
+      account._id,
+
+      {
+        $set: updateData,
+      },
+
+      session
+        ? { session }
+        : {},
+    );
 
   if (!updatedAccount) {
-    throw createError("Unable to save repayment virtual account", 500);
+    throw createError(
+      "Unable to save repayment virtual account",
+      500,
+    );
   }
 
   return updatedAccount;
