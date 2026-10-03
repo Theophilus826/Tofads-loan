@@ -21,6 +21,23 @@ const getMyKyc = async (req, res, next) => {
   }
 };
 
+const savePersonalInfo = async (req, res, next) => {
+  try {
+    const kyc = await KycService.savePersonalInfo(
+      req.user._id,
+      req.body || {},
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Personal information saved successfully",
+      data: kyc,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 /* =========================================================
    SUBMIT / UPDATE KYC
    ========================================================= */
@@ -654,6 +671,7 @@ const rejectKyc = async (
 
 module.exports = {
   getMyKyc,
+  savePersonalInfo,
   submitKyc,
 
   startBvnVerification,

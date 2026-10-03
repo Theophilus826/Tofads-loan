@@ -50,6 +50,12 @@ router.get(
   KycController.getMyKyc,
 );
 
+router.post(
+  "/personal",
+  protect,
+  KycController.savePersonalInfo,
+);
+
 /**
  * Submit / update KYC
  */

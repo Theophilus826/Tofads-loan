@@ -104,6 +104,37 @@ const getMyKyc = async (userId) => {
   return KycRepository.findByUserId(userId);
 };
 
+const savePersonalInfo = async (userId, data = {}) => {
+  if (!userId) {
+    throw createError("User is required", 401);
+  }
+
+  const firstName = clean(data.firstName);
+  const lastName = clean(data.lastName);
+
+  if (!firstName || !lastName) {
+    throw createError("First name and last name are required", 400);
+  }
+
+  const personalData = {
+    firstName,
+    lastName,
+    dateOfBirth: validateDateOfBirth(data.dateOfBirth),
+    gender: validateGender(data.gender),
+  };
+
+  const existingKyc = await KycRepository.findByUserId(userId);
+
+  if (existingKyc) {
+    return KycRepository.updateByUserId(userId, personalData);
+  }
+
+  return KycRepository.create({
+    user: userId,
+    ...personalData,
+  });
+};
+
 
 /*
  * ============================================================
@@ -2307,6 +2338,8 @@ const requireKycAndRepaymentAccount =
 
 module.exports = {
   getMyKyc,
+
+  savePersonalInfo,
 
   createOrUpdateKyc,
 

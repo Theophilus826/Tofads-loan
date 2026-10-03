@@ -44,7 +44,7 @@ const kycSchema = new mongoose.Schema(
 
     address: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
 
@@ -78,12 +78,12 @@ const kycSchema = new mongoose.Schema(
         "drivers_license",
         "voters_card",
       ],
-      required: true,
+      required: false,
     },
 
     idNumber: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
       select: false,
     },
