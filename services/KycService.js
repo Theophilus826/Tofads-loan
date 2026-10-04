@@ -1,6 +1,7 @@
 
 const KycRepository = require("../repositories/KycRepository");
 const BankAccountRepository = require("../repositories/BankAccountRepository");
+const RepaymentAccountRepository = require("../repositories/RepaymentAccountRepository");
 const User = require("../model/UserModel");
 const PaymentProvider = require("../config/PaymentProvider");
 const RepaymentAccountService =
@@ -146,7 +147,45 @@ const savePersonalInfo = async (userId, data = {}) => {
  * Get all KYC records.
  */
 const getAllKyc = async () => {
-  return KycRepository.findAllKyc();
+  const kycs = await KycRepository.findAllKyc();
+  const userIds = kycs
+    .map((kyc) => kyc.user?._id || kyc.user)
+    .filter(Boolean);
+  const repaymentAccounts =
+    await RepaymentAccountRepository.findByUsers(userIds);
+  const accountsByUser = new Map(
+    repaymentAccounts.map((account) => [
+      String(account.user),
+      account,
+    ]),
+  );
+
+  return kycs.map((kyc) => {
+    const data = kyc.toObject();
+    const userId = kyc.user?._id || kyc.user;
+    const account = accountsByUser.get(String(userId));
+
+    data.repaymentAccount = account
+      ? {
+          _id: account._id,
+          accountNumber: account.accountNumber,
+          accountName: account.accountName,
+          bankName: account.bankName,
+          bankCode: account.bankCode,
+          currency: account.currency,
+          balance: account.balance,
+          totalCredited: account.totalCredited,
+          totalRepaid: account.totalRepaid,
+          status: account.status,
+          provider: account.provider,
+          providerCustomerCode: account.providerCustomerCode,
+          providerAccountId: account.providerAccountId,
+          dvaStatus: account.dvaStatus,
+        }
+      : null;
+
+    return data;
+  });
 };
 
 /**

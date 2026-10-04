@@ -108,10 +108,51 @@ const getTransaction = async (req, res, next) => {
   }
 };
 
+
+const retryDedicatedVirtualAccount = async (req, res) => {
+  try {
+    const userId =
+      req.params.userId ||
+      req.user?._id ||
+      req.user?.id;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const result =
+      await RepaymentAccountService.retryDedicatedVirtualAccount(
+        userId,
+      );
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error(
+      "❌ RETRY DVA ERROR:",
+      error.response?.data ||
+        error.message ||
+        error,
+    );
+
+    return res.status(
+      error.statusCode || 500,
+    ).json({
+      success: false,
+      message:
+        error.message ||
+        "Unable to retry dedicated virtual account assignment",
+    });
+  }
+};
+
 module.exports = {
   getAccount,
   getBalance,
   getTransactions,
   getTransaction,
+  retryDedicatedVirtualAccount,
 };
 

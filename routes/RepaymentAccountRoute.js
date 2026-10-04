@@ -7,6 +7,7 @@ const RepaymentAccountController =
 
 const {
   protect,
+  admin,
 } = require("../middleware/AuthMiddleware");
 
 // ============================================================
@@ -39,6 +40,13 @@ router.get(
   "/repayment-account/transactions/:transactionId",
   protect,
   RepaymentAccountController.getTransaction
+);
+
+router.post(
+  "/repayment-account/:userId/retry-dva",
+  protect,
+  admin,
+  RepaymentAccountController.retryDedicatedVirtualAccount,
 );
 
 module.exports = router;

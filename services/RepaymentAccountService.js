@@ -67,6 +67,127 @@ const getUserForPaymentProvider = async (userId, session = null) => {
   return user;
 };
 
+const getAssignedDvaFromCustomer = (customerData) => {
+  const accounts = [
+    customerData?.dedicated_account,
+    ...(Array.isArray(customerData?.dedicated_accounts)
+      ? customerData.dedicated_accounts
+      : []),
+  ];
+
+  return (
+    accounts.find(
+      (dva) =>
+        dva?.active === true &&
+        dva?.assigned === true &&
+        dva?.id &&
+        dva?.account_number,
+    ) || null
+  );
+};
+
+const persistAssignedCustomerDva = async (
+  account,
+  customer,
+  user,
+  userId,
+  session = null,
+) => {
+  const dva = getAssignedDvaFromCustomer(
+    customer.providerData,
+  );
+
+  if (!dva) {
+    return null;
+  }
+
+  const updatedAccount =
+    await RepaymentAccountRepository
+      .updateDedicatedVirtualAccount(
+        account._id,
+        {
+          provider: "paystack",
+          dvaStatus: "active",
+          providerCustomerCode:
+            customer.customerCode,
+          providerAccountId:
+            String(dva.id),
+          accountNumber:
+            dva.account_number,
+          accountName:
+            dva.account_name || user.name || null,
+          bankName:
+            dva.bank?.name || null,
+          bankCode:
+            dva.bank?.code || null,
+          currency:
+            dva.currency || "NGN",
+          metadata: {
+            ...(account.metadata || {}),
+            purpose: "loan_repayment",
+            customerName: user.name || null,
+            paystackCustomer:
+              customer.providerData,
+            dedicatedVirtualAccount: dva,
+            existingDvaReconciledAt: new Date(),
+          },
+        },
+        session ? { session } : {},
+      );
+
+  if (!updatedAccount) {
+    throw createError(
+      "Unable to save existing Paystack dedicated virtual account",
+      500,
+    );
+  }
+
+  console.log(
+    "✅ EXISTING PAYSTACK DVA RECONCILED:",
+    {
+      accountId: updatedAccount._id,
+      userId,
+      providerAccountId: updatedAccount.providerAccountId,
+      accountNumber: updatedAccount.accountNumber,
+    },
+  );
+
+  return updatedAccount;
+};
+
+const markCompleteDvaActive = async (
+  account,
+  session = null,
+) => {
+  if (
+    account.provider !== "paystack" ||
+    account.dvaStatus === "active"
+  ) {
+    return account;
+  }
+
+  const updatedAccount =
+    await RepaymentAccountRepository.findByIdAndUpdate(
+      account._id,
+      {
+        $set: {
+          provider: "paystack",
+          dvaStatus: "active",
+        },
+      },
+      session ? { session } : {},
+    );
+
+  if (!updatedAccount) {
+    throw createError(
+      "Unable to activate repayment account with complete DVA details",
+      500,
+    );
+  }
+
+  return updatedAccount;
+};
+
 // =========================================================
 // ENSURE DEDICATED VIRTUAL ACCOUNT
 // =========================================================
@@ -76,6 +197,11 @@ const ensureDedicatedVirtualAccount = async (
   userId,
   session = null,
 ) => {
+  const hasPendingAssignment =
+    account.provider === "paystack" &&
+    account.dvaStatus === "pending" &&
+    Boolean(account.providerCustomerCode);
+
   // -------------------------------------------------------
   // DVA already fully exists
   // -------------------------------------------------------
@@ -85,7 +211,10 @@ const ensureDedicatedVirtualAccount = async (
     account.providerAccountId &&
     account.providerCustomerCode
   ) {
-    return account;
+    return markCompleteDvaActive(
+      account,
+      session,
+    );
   }
 
   const user = await getUserForPaymentProvider(
@@ -129,6 +258,23 @@ const ensureDedicatedVirtualAccount = async (
       "Paystack customer could not be created or retrieved",
       502,
     );
+  }
+
+  const reconciledAccount =
+    await persistAssignedCustomerDva(
+      account,
+      customer,
+      user,
+      userId,
+      session,
+    );
+
+  if (reconciledAccount) {
+    return reconciledAccount;
+  }
+
+  if (hasPendingAssignment) {
+    return account;
   }
 
   // -------------------------------------------------------
@@ -211,12 +357,21 @@ const ensureDedicatedVirtualAccount = async (
   // SAVE DVA
   // -------------------------------------------------------
 
+  const assignmentIsComplete =
+    dedicatedAccount.assigned === true &&
+    Boolean(
+      dedicatedAccount.providerAccountId &&
+        dedicatedAccount.accountNumber,
+    );
+
   const updateData = {
     provider: "paystack",
 
     dvaStatus:
-      dedicatedAccount.dvaStatus ||
-      "pending",
+      assignmentIsComplete
+        ? "active"
+        : dedicatedAccount.dvaStatus ||
+          "pending",
 
     providerCustomerCode:
       customer.customerCode,
@@ -359,7 +514,10 @@ const getOrCreateAccountWithDva = async (userId, session = null) => {
     account.providerCustomerCode;
 
   if (hasCompleteDva) {
-    return account;
+    return markCompleteDvaActive(
+      account,
+      session,
+    );
   }
 
   // -------------------------------------------------------
@@ -375,7 +533,11 @@ const getOrCreateAccountWithDva = async (userId, session = null) => {
     account.dvaStatus === "pending" &&
     account.providerCustomerCode
   ) {
-    return account;
+    return ensureDedicatedVirtualAccount(
+      account,
+      userId,
+      session,
+    );
   }
 
   // -------------------------------------------------------
@@ -393,21 +555,21 @@ const getOrCreateAccountWithDva = async (userId, session = null) => {
 // GET REPAYMENT ACCOUNT
 // =========================================================
 
-const getAccount = async (req, res, next) => {
-  try {
-    const account =
-      await RepaymentAccountService.getAccount(
-        req.user._id,
-      );
-
-    return res.status(200).json({
-      success: true,
-      message: "Repayment account retrieved successfully",
-      data: account,
-    });
-  } catch (error) {
-    return next(error);
+const getAccount = async (userId) => {
+  if (!userId) {
+    throw createError("User ID is required", 400);
   }
+
+  const account =
+    await RepaymentAccountRepository.findByUserInternal(
+      userId,
+    );
+
+  if (!account) {
+    throw createError("Repayment account not found", 404);
+  }
+
+  return account;
 };
 
 // =========================================================
@@ -1144,6 +1306,53 @@ const creditDedicatedVirtualAccount = async ({
   }
 };
 
+const retryDedicatedVirtualAccount = async (userId) => {
+  if (!userId) {
+    throw new Error("User ID is required");
+  }
+
+  let account =
+    await RepaymentAccountRepository.findByUserInternal(
+      userId,
+    );
+
+  if (!account) {
+    account =
+      await getOrCreateAccountWithDva(userId);
+  }
+
+  account = await ensureDedicatedVirtualAccount(
+    account,
+    userId,
+  );
+
+  const isActive =
+    account.dvaStatus === "active" &&
+    account.accountNumber &&
+    account.providerAccountId;
+
+  return {
+    success: true,
+    status: isActive ? "active" : "pending",
+    message: isActive
+      ? "Dedicated virtual account is active"
+      : "Dedicated virtual account assignment is processing. Waiting for Paystack assignment webhook.",
+    account: {
+      accountId: account._id,
+      accountNumber: account.accountNumber || null,
+      accountName: account.accountName || null,
+      bankName: account.bankName || null,
+      bankCode: account.bankCode || null,
+      currency: account.currency || "NGN",
+      provider: account.provider,
+      providerCustomerCode:
+        account.providerCustomerCode,
+      providerAccountId:
+        account.providerAccountId || null,
+      dvaStatus: account.dvaStatus,
+    },
+  };
+};
 // =========================================================
 // EXPORT
 // =========================================================
@@ -1170,4 +1379,5 @@ module.exports = {
   getTransaction,
 
   creditDedicatedVirtualAccount,
+  retryDedicatedVirtualAccount,
 };

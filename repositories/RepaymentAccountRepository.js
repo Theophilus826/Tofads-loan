@@ -57,6 +57,16 @@ const findByUser = async (userId, session = null) => {
   return query;
 };
 
+const findByUsers = async (userIds) => {
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return [];
+  }
+
+  return RepaymentAccount.find({
+    user: { $in: userIds },
+  });
+};
+
 // =========================================================
 // INTERNAL CUSTOMER LOOKUP
 // =========================================================
@@ -683,6 +693,7 @@ module.exports = {
 
   // Customer
   findByUser,
+  findByUsers,
   findByUserInternal,
 
   // ID
