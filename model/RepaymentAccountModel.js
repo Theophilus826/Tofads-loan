@@ -2,10 +2,7 @@ const mongoose = require("mongoose");
 
 const repaymentAccountSchema = new mongoose.Schema(
   {
-    // =====================================================
-    // CUSTOMER
-    // =====================================================
-
+    // One repayment account per user
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -13,14 +10,16 @@ const repaymentAccountSchema = new mongoose.Schema(
       unique: true,
     },
 
-    // =====================================================
-    // ACCOUNT DETAILS
-    // =====================================================
-
+    // Paystack DVA account number
+    //
+    // IMPORTANT:
+    // Do NOT use unique:true here.
+    //
+    // A DVA can legitimately be pending with accountNumber = null.
+    // Uniqueness is enforced below with a partial index that only
+    // applies when accountNumber is a real string.
     accountNumber: {
       type: String,
-      unique: true,
-      sparse: true,
       trim: true,
       default: null,
     },
@@ -51,10 +50,7 @@ const repaymentAccountSchema = new mongoose.Schema(
       required: true,
     },
 
-    // =====================================================
-    // BALANCE
-    // =====================================================
-
+    // Current repayment wallet balance
     balance: {
       type: Number,
       default: 0,
@@ -62,10 +58,7 @@ const repaymentAccountSchema = new mongoose.Schema(
       required: true,
     },
 
-    // =====================================================
-    // ACCOUNT TOTALS
-    // =====================================================
-
+    // Total money ever credited to the repayment account
     totalCredited: {
       type: Number,
       default: 0,
@@ -73,6 +66,7 @@ const repaymentAccountSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Total amount applied toward loan repayment
     totalRepaid: {
       type: Number,
       default: 0,
@@ -80,98 +74,52 @@ const repaymentAccountSchema = new mongoose.Schema(
       required: true,
     },
 
-    // =====================================================
-    // ACCOUNT STATUS
-    // =====================================================
-
     status: {
       type: String,
-      enum: [
-        "active",
-        "suspended",
-        "closed",
-      ],
+      enum: ["active", "suspended", "closed"],
       default: "active",
       required: true,
       index: true,
     },
 
-    // =====================================================
-    // PROVIDER
-    // =====================================================
-
+    // Payment provider
     provider: {
       type: String,
-      enum: [
-        "paystack",
-        "manual",
-        "internal",
-      ],
+      enum: ["paystack", "manual", "internal"],
       default: "paystack",
       required: true,
       lowercase: true,
       index: true,
     },
 
-    // =====================================================
-    // PAYSTACK DVA STATUS
-    // =====================================================
+    // DVA provisioning lifecycle
     //
-    // This is separate from the local account status.
-    //
-    // pending:
-    // Paystack assignment has been requested but the
-    // dedicated account details have not arrived yet.
-    //
-    // active:
-    // Paystack has successfully assigned the DVA.
-    //
-    // failed:
-    // DVA assignment failed.
-    //
-
+    // pending = assignment requested but Paystack has not confirmed it
+    // active  = Paystack confirmed the DVA
+    // failed  = Paystack assignment failed
     dvaStatus: {
       type: String,
-      enum: [
-        "pending",
-        "active",
-        "failed",
-      ],
+      enum: ["pending", "active", "failed"],
       default: "pending",
       required: true,
       index: true,
     },
 
-    // =====================================================
-    // PROVIDER CUSTOMER
-    // =====================================================
-    //
-    // Paystack customer code associated with the user.
-    //
-
+    // Paystack customer code
     providerCustomerCode: {
       type: String,
       trim: true,
       default: null,
     },
 
-    // =====================================================
-    // PROVIDER ACCOUNT
-    // =====================================================
-    //
-    // Paystack dedicated virtual account ID.
-    //
-
+    // Paystack dedicated account ID
     providerAccountId: {
       type: String,
       trim: true,
       default: null,
     },
 
-    // =====================================================
-    // PROVIDER DATA / METADATA
-    // =====================================================
-
+    // Additional provider/account information
     metadata: {
       type: mongoose.Schema.Types.Mixed,
       default: null,
@@ -179,126 +127,151 @@ const repaymentAccountSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-// =========================================================
-// INDEXES
-// =========================================================
+/*
+|--------------------------------------------------------------------------
+| NORMAL INDEXES
+|--------------------------------------------------------------------------
+*/
 
-// Customer account lookup by status
 repaymentAccountSchema.index({
   user: 1,
   status: 1,
 });
 
-// Provider account lookup by status
 repaymentAccountSchema.index({
   provider: 1,
   status: 1,
 });
 
-// DVA lookup by status
 repaymentAccountSchema.index({
   provider: 1,
   dvaStatus: 1,
 });
 
-// =========================================================
-// PAYSTACK DVA INDEXES
-// =========================================================
+// Provider identifier indexes are migrated after connecting to MongoDB.
+// Partial indexes avoid collisions for the default null identifier values.
 
-// One repayment account per Paystack customer code
-//
-// sparse: true allows accounts without a customer code.
-//
-// The provider is included so the same customer code could
-// theoretically exist under another payment provider.
+/*
+|--------------------------------------------------------------------------
+| UNIQUE DVA ACCOUNT NUMBER
+|--------------------------------------------------------------------------
+|
+| IMPORTANT:
+|
+| Do NOT use:
+|
+|   accountNumber: {
+|     unique: true,
+|     sparse: true
+|   }
+|
+| together with:
+|
+|   default: null
+|
+| because explicit null values can collide with the existing MongoDB
+| unique index.
+|
+| Instead, use a PARTIAL unique index.
+|
+| This means:
+|
+|   accountNumber = null
+|       -> allowed
+|
+|   accountNumber missing
+|       -> allowed
+|
+|   accountNumber = "1234567890"
+|       -> must be unique
+|
+|   accountNumber = "1234567890" on another account
+|       -> rejected
+|
+|--------------------------------------------------------------------------
+*/
 
 repaymentAccountSchema.index(
   {
-    provider: 1,
-    providerCustomerCode: 1,
+    accountNumber: 1,
   },
   {
     unique: true,
-    sparse: true,
-  }
-);
-
-// One repayment account per provider-side DVA ID
-repaymentAccountSchema.index(
-  {
-    provider: 1,
-    providerAccountId: 1,
+    partialFilterExpression: {
+      accountNumber: {
+        $type: "string",
+      },
+    },
   },
-  {
-    unique: true,
-    sparse: true,
-  }
 );
 
-// accountNumber already has unique + sparse above.
-// No duplicate index is needed here.
+/*
+|--------------------------------------------------------------------------
+| VIRTUAL: AVAILABLE BALANCE
+|--------------------------------------------------------------------------
+*/
 
-// =========================================================
-// VIRTUALS
-// =========================================================
-
-repaymentAccountSchema.virtual("availableBalance").get(
-  function () {
-    return Number(this.balance || 0);
+repaymentAccountSchema.virtual("availableBalance").get(function () {
+  return Number(this.balance || 0);
 });
 
-// =========================================================
-// METHODS
-// =========================================================
+/*
+|--------------------------------------------------------------------------
+| METHOD: CHECK SUFFICIENT BALANCE
+|--------------------------------------------------------------------------
+*/
 
-repaymentAccountSchema.methods.hasSufficientBalance =
-  function (amount) {
-    const numericAmount = Number(amount);
+repaymentAccountSchema.methods.hasSufficientBalance = function (amount) {
+  const numericAmount = Number(amount);
 
-    if (
-      !Number.isFinite(numericAmount) ||
-      numericAmount <= 0
-    ) {
-      return false;
-    }
+  if (!Number.isFinite(numericAmount)) {
+    return false;
+  }
 
-    return (
-      Number(this.balance || 0) >= numericAmount
-    );
-  };
+  if (numericAmount <= 0) {
+    return false;
+  }
 
-repaymentAccountSchema.methods.isActive =
-  function () {
-    return this.status === "active";
-  };
+  return Number(this.balance || 0) >= numericAmount;
+};
 
-repaymentAccountSchema.methods.hasActiveDva =
-  function () {
-    return (
-      this.provider === "paystack" &&
-      this.dvaStatus === "active" &&
-      !!this.accountNumber &&
-      !!this.providerAccountId &&
-      !!this.providerCustomerCode
-    );
-  };
+/*
+|--------------------------------------------------------------------------
+| METHOD: CHECK ACCOUNT STATUS
+|--------------------------------------------------------------------------
+*/
 
-// =========================================================
-// MODEL
-// =========================================================
+repaymentAccountSchema.methods.isActive = function () {
+  return this.status === "active";
+};
+
+/*
+|--------------------------------------------------------------------------
+| METHOD: CHECK ACTIVE PAYSTACK DVA
+|--------------------------------------------------------------------------
+*/
+
+repaymentAccountSchema.methods.hasActiveDva = function () {
+  return (
+    this.provider === "paystack" &&
+    this.dvaStatus === "active" &&
+    !!this.accountNumber &&
+    !!this.providerAccountId &&
+    !!this.providerCustomerCode
+  );
+};
+
+/*
+|--------------------------------------------------------------------------
+| MODEL
+|--------------------------------------------------------------------------
+*/
 
 const RepaymentAccount =
   mongoose.models.RepaymentAccount ||
-  mongoose.model(
-    "RepaymentAccount",
-    repaymentAccountSchema
-  );
-
-// =========================================================
-// EXPORT
-// =========================================================
+  mongoose.model("RepaymentAccount", repaymentAccountSchema);
 
 module.exports = RepaymentAccount;

@@ -730,7 +730,7 @@ const createDedicatedVirtualAccount = async ({
   let lastError = null;
 
   // =======================================================
-  // TRY EACH AVAILABLE PROVIDER
+  // TRY AVAILABLE PROVIDERS
   // =======================================================
 
   for (const provider of orderedProviders) {
@@ -738,7 +738,6 @@ const createDedicatedVirtualAccount = async ({
 
     const payload = {
       ...basePayload,
-
       preferred_bank: providerSlug,
     };
 
@@ -758,78 +757,156 @@ const createDedicatedVirtualAccount = async ({
         payload,
       );
 
-      const data = response.data?.data || null;
+      const responseBody = response?.data || {};
 
-      if (!data) {
-        throw new Error(
-          "Paystack did not return dedicated virtual account data",
+      console.log(
+        "📥 PAYSTACK DVA ASSIGN RESPONSE:",
+        JSON.stringify(responseBody, null, 2),
+      );
+
+      // ===================================================
+      // PAYSTACK ACCEPTED ASSIGNMENT
+      // ===================================================
+      //
+      // IMPORTANT:
+      //
+      // Paystack processes DVA assignment asynchronously.
+      //
+      // Therefore:
+      //
+      // status === true
+      //
+      // can be successful even when:
+      //
+      // responseBody.data === undefined/null
+      //
+      // The actual account number will arrive through:
+      //
+      // dedicatedaccount.assign.success
+      //
+      // webhook.
+      //
+      // ===================================================
+
+      if (responseBody.status === true) {
+        const data = responseBody.data || null;
+
+        console.log(
+          "✅ PAYSTACK DVA ASSIGNMENT REQUEST ACCEPTED",
         );
+
+        console.log(
+          "⏳ PAYSTACK DVA ASSIGNMENT IS PROCESSING ASYNCHRONOUSLY",
+        );
+
+        console.log(
+          "🏦 PAYSTACK DVA PROVIDER:",
+          providerSlug,
+        );
+
+        console.log(
+          "🏦 PAYSTACK DVA MESSAGE:",
+          responseBody.message || null,
+        );
+
+        if (data) {
+          console.log(
+            "🏦 PAYSTACK DVA IMMEDIATE DATA:",
+            JSON.stringify(data, null, 2),
+          );
+        } else {
+          console.log(
+            "ℹ️ PAYSTACK HAS NOT RETURNED DVA ACCOUNT DETAILS YET",
+          );
+        }
+
+        // =================================================
+        // RETURN PENDING DVA
+        // =================================================
+        //
+        // Do NOT mark the DVA as active here.
+        //
+        // Paystack webhook will later update it to active.
+        //
+        // =================================================
+
+        return {
+          provider: "paystack",
+
+          status: "pending",
+
+          dvaStatus: "pending",
+
+          assigned: Boolean(data?.assigned),
+
+          providerAccountId:
+            data?.id ||
+            data?.dedicated_account_id ||
+            null,
+
+          accountNumber:
+            data?.account_number ||
+            null,
+
+          accountName:
+            data?.account_name ||
+            null,
+
+          bankName:
+            data?.bank?.name ||
+            provider?.bank_name ||
+            null,
+
+          bankCode:
+            data?.bank?.code ||
+            null,
+
+          bankSlug:
+            data?.bank?.slug ||
+            providerSlug ||
+            null,
+
+          currency:
+            data?.currency ||
+            "NGN",
+
+          customerCode:
+            data?.customer?.customer_code ||
+            data?.customer_code ||
+            customerCode,
+
+          providerData: responseBody,
+        };
       }
 
-      console.log(
-        "✅ PAYSTACK DVA ASSIGNMENT REQUEST ACCEPTED",
-      );
-
-      console.log(
-        "🏦 PAYSTACK DVA RESPONSE:",
-        JSON.stringify(data, null, 2),
-      );
-
       // ===================================================
-      // RETURN NORMALIZED DVA
+      // PAYSTACK EXPLICITLY REJECTED REQUEST
       // ===================================================
 
-      return {
-        provider: "paystack",
+      const paystackMessage =
+        responseBody?.message ||
+        "Paystack rejected dedicated virtual account assignment";
 
-        status: "pending",
-
-        dvaStatus: "pending",
-
-        assigned: Boolean(data.assigned),
-
-        providerAccountId:
-          data.id || null,
-
-        accountNumber:
-          data.account_number || null,
-
-        accountName:
-          data.account_name || null,
-
-        bankName:
-          data.bank?.name || null,
-
-        bankCode:
-          data.bank?.code || null,
-
-        bankSlug:
-          data.bank?.slug ||
-          providerSlug ||
-          null,
-
-        currency:
-          data.currency || "NGN",
-
-        customerCode:
-          data.customer?.customer_code ||
-          data.customer_code ||
-          customerCode,
-
-        providerData:
-          data,
-      };
+      throw new Error(paystackMessage);
     } catch (error) {
       lastError = error;
 
       console.error(
         `❌ PAYSTACK DVA PROVIDER FAILED: ${providerSlug}`,
-        error?.providerData ||
-          error?.response?.data ||
+        error?.response?.data ||
+          error?.providerData ||
           error?.message,
       );
 
-      // Continue to the next available provider.
+      // ===================================================
+      // IMPORTANT:
+      //
+      // Only continue to another provider when Paystack
+      // actually rejected the assignment request.
+      //
+      // If Paystack returned status:true, we already returned
+      // above and will NOT try another provider.
+      // ===================================================
     }
   }
 
