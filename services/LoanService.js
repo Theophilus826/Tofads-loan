@@ -1370,6 +1370,9 @@ const getLoanDashboard = async (
       activeLoans:
         activeLoans.length,
 
+      totalBorrowed:
+        totalPrincipal,
+
       totalPrincipal,
 
       totalRepayment,

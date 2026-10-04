@@ -38,6 +38,7 @@ const VerificationRoutes = require("./routes/VerificationRoute");
 const LedgerRoutes = require("./routes/LedgerRoute");
 const adminLedgerRoutes = require("./routes/AdminLedgerRoute");
 const adminLoanRoutes = require("./routes/AdminLoanRoute");
+const adminLoanApplicationRoutes = require("./routes/adminLoanApplicationRoutes");
 const adminLoanProductRoutes = require("./routes/AdminLoanProductRoute");
 const loanProductRoutes = require("./routes/LoanProductRoute");
 const adminBorrowerRoutes = require("./routes/AdminBorrowerRoute");
@@ -317,6 +318,15 @@ const startServer = async () => {
     // ==========================
 
     app.use("/api/admin/loans", adminLoanRoutes);
+
+    // ==========================
+    // ADMIN LOAN APPLICATIONS
+    // ==========================
+
+    app.use(
+      "/api/admin/loan-applications",
+      adminLoanApplicationRoutes,
+    );
 
     // ==========================
     // ADMIN LEDGER
