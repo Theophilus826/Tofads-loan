@@ -9,9 +9,11 @@ const {
 
 const {
   getRepaymentSchedule,
+  getRepaymentSchedules,
   getRepayment,
   makeRepayment,
   initiateRepayment,
+  repayFromAccount,
   getRepaymentHistory,
 } = require(
   "../controllers/RepaymentController"
@@ -23,6 +25,12 @@ const router = express.Router();
 // =========================================================
 // REPAYMENT SCHEDULE
 // =========================================================
+
+router.get(
+  "/schedule",
+  protect,
+  getRepaymentSchedules,
+);
 
 router.get(
   "/schedule/:repaymentScheduleId",
@@ -60,6 +68,12 @@ router.post(
   "/initiate",
   protect,
   initiateRepayment
+);
+
+router.post(
+  "/account",
+  protect,
+  repayFromAccount,
 );
 
 // =========================================================

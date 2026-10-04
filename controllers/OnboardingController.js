@@ -257,6 +257,12 @@ const getOnboardingStatus = async (req, res) => {
     // RESPONSE
     // =========================================================
 
+    const kycStatus = String(
+      kyc?.status || "NOT_STARTED",
+    )
+      .trim()
+      .toUpperCase();
+
     return res.status(200).json({
       success: true,
 
@@ -269,8 +275,8 @@ const getOnboardingStatus = async (req, res) => {
         // =====================================================
 
         kyc: {
-          completed: !!kyc,
-          status: kyc?.status || "NOT_STARTED",
+          completed: kycStatus === "VERIFIED",
+          status: kycStatus,
         },
 
         // =====================================================

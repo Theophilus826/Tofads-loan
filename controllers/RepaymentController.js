@@ -52,6 +52,27 @@ const getRepaymentSchedule = async (
   }
 };
 
+const getRepaymentSchedules = async (
+  req,
+  res,
+  next,
+) => {
+  try {
+    const schedules =
+      await RepaymentScheduleRepository.findByUser(
+        req.user._id,
+      );
+
+    return res.status(200).json({
+      success: true,
+      count: schedules.length,
+      data: schedules,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 
 
 // =========================================================
@@ -140,6 +161,55 @@ return res.status(201).json({
 } catch (error) {
 return next(error);
 }
+};
+
+const repayFromAccount = async (
+  req,
+  res,
+  next,
+) => {
+  try {
+    const {
+      repaymentScheduleId,
+      amount,
+    } = req.body || {};
+
+    if (!repaymentScheduleId) {
+      return res.status(400).json({
+        success: false,
+        message: "Repayment schedule ID is required",
+      });
+    }
+
+    if (
+      amount === undefined ||
+      amount === null ||
+      !Number.isFinite(Number(amount)) ||
+      Number(amount) <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid repayment amount is required",
+      });
+    }
+
+    const result =
+      await RepaymentService.repayFromAccount(
+        req.user._id,
+        {
+          repaymentScheduleId,
+          amount: Number(amount),
+        },
+      );
+
+    return res.status(200).json({
+      success: true,
+      message: "Repayment completed successfully",
+      data: result,
+    });
+  } catch (error) {
+    return next(error);
+  }
 };
 
 // =========================================================
@@ -300,8 +370,10 @@ const makeRepayment = async (
 
 module.exports = {
 getRepaymentSchedule,
+getRepaymentSchedules,
 initiateRepayment,
 getRepaymentHistory,
 getRepayment,
 makeRepayment,
+repayFromAccount,
 };
