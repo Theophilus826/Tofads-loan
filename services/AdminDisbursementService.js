@@ -2210,6 +2210,7 @@ const markDisbursementFailed = async (
   // =========================================================
 
   const failureReason =
+    providerResult?.failureReason ||
     providerResult?.providerData?.failure_reason ||
     providerResult?.providerData?.data?.failure_reason ||
     providerResult?.providerData?.message ||
@@ -2414,6 +2415,7 @@ const markDisbursementReversed = async (
   // =========================================================
 
   const reversalReason =
+    providerResult?.failureReason ||
     providerResult?.providerData?.failure_reason ||
     providerResult?.providerData?.data?.failure_reason ||
     providerResult?.providerData?.message ||

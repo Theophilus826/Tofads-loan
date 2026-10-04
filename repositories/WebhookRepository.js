@@ -1,24 +1,43 @@
+const crypto = require("crypto");
+
 const WebhookEvent = require(
-  "../model/WebhookEventModel"
+  "../model/WebhookEventModel",
 );
+
+// =========================================================
+// CONFIG
+// =========================================================
+
+// A webhook that remains processing for this long can
+// be recovered by another request.
+const PROCESSING_TIMEOUT_MS =
+  5 * 60 * 1000;
 
 // =========================================================
 // HELPERS
 // =========================================================
 
-const normalizeProvider = provider =>
-  provider
-    ? String(provider).trim().toLowerCase()
-    : provider;
+const normalizeProvider = (provider) => {
+  if (!provider) {
+    return provider;
+  }
 
-const normalizeEventId = eventId =>
-  eventId
-    ? String(eventId).trim()
-    : eventId;
+  return String(provider)
+    .trim()
+    .toLowerCase();
+};
 
-// How long a webhook can remain "processing" before
-// another request is allowed to recover it.
-const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
+const normalizeEventId = (eventId) => {
+  if (!eventId) {
+    return eventId;
+  }
+
+  return String(eventId).trim();
+};
+
+const createProcessingToken = () => {
+  return crypto.randomUUID();
+};
 
 // =========================================================
 // FIND BY EVENT ID
@@ -26,62 +45,136 @@ const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
 
 const findByEventId = async (
   provider,
-  eventId
+  eventId,
 ) => {
   if (!provider || !eventId) {
     return null;
   }
 
   return WebhookEvent.findOne({
-    provider: normalizeProvider(provider),
-    eventId: normalizeEventId(eventId),
+    provider:
+      normalizeProvider(provider),
+
+    eventId:
+      normalizeEventId(eventId),
   });
 };
 
 // =========================================================
 // CREATE WEBHOOK EVENT
 // =========================================================
+//
+// Creates the first processing record.
+//
+// IMPORTANT:
+// The database must have:
+//
+// {
+//   provider: 1,
+//   eventId: 1
+// }
+//
+// with unique: true.
+//
+// =========================================================
 
-const create = async (
-  data
-) => {
+const create = async (data) => {
+  if (!data?.provider) {
+    throw new Error(
+      "Webhook provider is required",
+    );
+  }
+
+  if (!data?.eventId) {
+    throw new Error(
+      "Webhook eventId is required",
+    );
+  }
+
+  if (!data?.eventType) {
+    throw new Error(
+      "Webhook eventType is required",
+    );
+  }
+
+  if (
+    data.payload === undefined ||
+    data.payload === null
+  ) {
+    throw new Error(
+      "Webhook payload is required",
+    );
+  }
+
+  const now = new Date();
+
+  const processingToken =
+    data.processingToken ||
+    createProcessingToken();
+
   return WebhookEvent.create({
     ...data,
 
-    provider: normalizeProvider(
-      data.provider
-    ),
+    provider:
+      normalizeProvider(
+        data.provider,
+      ),
 
-    eventId: normalizeEventId(
-      data.eventId
-    ),
+    eventId:
+      normalizeEventId(
+        data.eventId,
+      ),
 
-    status: data.status || "processing",
+    status:
+      data.status ||
+      "processing",
 
+    // First creation = first attempt.
+    //
+    // Do NOT increment here.
+    // Retries are incremented by markProcessing().
     attempts:
-      Number(data.attempts || 0) + 1,
+      data.attempts !== undefined
+        ? Number(data.attempts)
+        : 1,
 
     processingAt:
-      data.processingAt || new Date(),
+      data.processingAt ||
+      now,
+
+    processingToken,
+
+    receivedAt:
+      data.receivedAt ||
+      now,
+
+    processedAt: null,
+
+    failedAt: null,
+
+    errorMessage: null,
   });
 };
 
 // =========================================================
 // MARK PROCESSING
 // =========================================================
+//
 // Atomically acquires processing ownership.
 //
-// Returns null when another request is already processing
-// a fresh webhook.
+// A webhook can be acquired when:
 //
-// Returns the document when:
-// - webhook is new/retryable
-// - previous processing attempt is stale
+//   1. status = received
+//   2. status = failed
+//   3. status = processing AND stale
+//
+// A fresh processing webhook cannot be acquired.
+//
 // =========================================================
 
 const markProcessing = async (
   provider,
-  eventId
+  eventId,
 ) => {
   if (!provider || !eventId) {
     return null;
@@ -97,65 +190,120 @@ const markProcessing = async (
 
   const staleBefore = new Date(
     now.getTime() -
-      PROCESSING_TIMEOUT_MS
+      PROCESSING_TIMEOUT_MS,
   );
 
-  return WebhookEvent.findOneAndUpdate(
-    {
-      provider: normalizedProvider,
-      eventId: normalizedEventId,
+  const processingToken =
+    createProcessingToken();
 
-      $or: [
-        {
-          status: {
-            $in: [
-              "failed",
-              "processing",
-            ],
+  const document =
+    await WebhookEvent.findOneAndUpdate(
+      {
+        provider:
+          normalizedProvider,
+
+        eventId:
+          normalizedEventId,
+
+        $or: [
+          // -------------------------------------------------
+          // RECEIVED
+          // -------------------------------------------------
+
+          {
+            status: "received",
           },
 
-          $or: [
-            {
-              status: "failed",
-            },
-            {
-              status: "processing",
-              processingAt: {
-                $lte: staleBefore,
+          // -------------------------------------------------
+          // FAILED
+          // -------------------------------------------------
+
+          {
+            status: "failed",
+          },
+
+          // -------------------------------------------------
+          // STALE PROCESSING
+          // -------------------------------------------------
+
+          {
+            status: "processing",
+
+            $or: [
+              {
+                processingAt: null,
               },
-            },
-          ],
-        },
-      ],
-    },
-    {
-      $set: {
-        status: "processing",
-        processingAt: now,
-        errorMessage: null,
+
+              {
+                processingAt: {
+                  $lte: staleBefore,
+                },
+              },
+            ],
+          },
+        ],
       },
 
-      $inc: {
-        attempts: 1,
+      {
+        $set: {
+          status: "processing",
+
+          processingAt: now,
+
+          processingToken,
+
+          processedAt: null,
+
+          failedAt: null,
+
+          errorMessage: null,
+        },
+
+        $inc: {
+          attempts: 1,
+        },
       },
-    },
-    {
-      returnDocument: "after",
-      runValidators: true,
-    }
-  );
+
+      {
+        returnDocument: "after",
+
+        runValidators: true,
+      },
+    );
+
+  if (!document) {
+    // Another worker owns a fresh processing record,
+    // or the webhook has already been processed.
+    return null;
+  }
+
+  return {
+    document,
+
+    processingToken,
+  };
 };
 
 // =========================================================
 // MARK PROCESSED
 // =========================================================
+//
+// Only the worker holding the current processingToken
+// can mark the webhook as processed.
+//
+// =========================================================
 
 const markProcessed = async (
   provider,
   eventId,
-  update = {}
+  processingToken,
+  update = {},
 ) => {
-  if (!provider || !eventId) {
+  if (
+    !provider ||
+    !eventId ||
+    !processingToken
+  ) {
     return null;
   }
 
@@ -166,68 +314,109 @@ const markProcessed = async (
 
     processingAt: null,
 
+    processingToken: null,
+
+    failedAt: null,
+
     errorMessage: null,
   };
 
-  if (update.result !== undefined) {
-    setData.result = update.result;
+  if (
+    update.result !== undefined
+  ) {
+    setData.result =
+      update.result;
   }
 
-  return WebhookEvent.findOneAndUpdate(
-    {
-      provider:
-        normalizeProvider(provider),
+  const document =
+    await WebhookEvent.findOneAndUpdate(
+      {
+        provider:
+          normalizeProvider(provider),
 
-      eventId:
-        normalizeEventId(eventId),
-    },
-    {
-      $set: setData,
-    },
-    {
-      returnDocument: "after",
-      runValidators: true,
-    }
-  );
+        eventId:
+          normalizeEventId(eventId),
+
+        status: "processing",
+
+        processingToken,
+      },
+
+      {
+        $set: setData,
+      },
+
+      {
+        returnDocument: "after",
+
+        runValidators: true,
+      },
+    );
+
+  return document;
 };
 
 // =========================================================
 // MARK FAILED
 // =========================================================
+//
+// Only the worker holding the current processingToken
+// can mark the webhook as failed.
+//
+// =========================================================
 
 const markFailed = async (
   provider,
   eventId,
-  errorMessage
+  processingToken,
+  errorMessage,
 ) => {
-  if (!provider || !eventId) {
+  if (
+    !provider ||
+    !eventId ||
+    !processingToken
+  ) {
     return null;
   }
 
-  return WebhookEvent.findOneAndUpdate(
-    {
-      provider:
-        normalizeProvider(provider),
+  const document =
+    await WebhookEvent.findOneAndUpdate(
+      {
+        provider:
+          normalizeProvider(provider),
 
-      eventId:
-        normalizeEventId(eventId),
-    },
-    {
-      $set: {
-        status: "failed",
+        eventId:
+          normalizeEventId(eventId),
 
-        processingAt: null,
+        status: "processing",
 
-        errorMessage:
-          errorMessage ||
-          "Webhook processing failed",
+        processingToken,
       },
-    },
-    {
-      returnDocument: "after",
-      runValidators: true,
-    }
-  );
+
+      {
+        $set: {
+          status: "failed",
+
+          processingAt: null,
+
+          processingToken: null,
+
+          failedAt: new Date(),
+
+          errorMessage:
+            errorMessage ||
+            "Webhook processing failed",
+        },
+      },
+
+      {
+        returnDocument: "after",
+
+        runValidators: true,
+      },
+    );
+
+  return document;
 };
 
 // =========================================================
@@ -236,8 +425,14 @@ const markFailed = async (
 
 module.exports = {
   findByEventId,
+
   create,
+
   markProcessing,
+
   markProcessed,
+
   markFailed,
+
+  PROCESSING_TIMEOUT_MS,
 };

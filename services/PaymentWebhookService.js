@@ -1,24 +1,24 @@
+
 const WebhookRepository = require("../repositories/WebhookRepository");
-
 const MandateRepository = require("../repositories/MandateRepository");
-
 const RepaymentRepository = require("../repositories/RepaymentRepository");
-
 const RepaymentAccountRepository = require("../repositories/RepaymentAccountRepository");
 
-const RepaymentService = require("./RepaymentService");
-
 const RepaymentAccountService = require("./RepaymentAccountService");
-
 const AdminDisbursementService = require("./AdminDisbursementService");
 
-const { verifyWebhookSignature } = require("../config/PaymentProvider");
+const {
+  verifyWebhookSignature,
+} = require("../config/PaymentProvider");
 
 // =========================================================
 // HELPERS
 // =========================================================
 
-const createError = (message, statusCode = 400) => {
+const createError = (
+  message,
+  statusCode = 400,
+) => {
   const error = new Error(message);
 
   error.statusCode = statusCode;
@@ -30,7 +30,9 @@ const createError = (message, statusCode = 400) => {
 // NORMALIZE EVENT TYPE
 // =========================================================
 
-const normalizeEventType = (eventType) => {
+const normalizeEventType = (
+  eventType,
+) => {
   return String(eventType || "")
     .trim()
     .toLowerCase();
@@ -40,7 +42,9 @@ const normalizeEventType = (eventType) => {
 // EXTRACT PROVIDER REFERENCE
 // =========================================================
 
-const getProviderReference = (payload) => {
+const getProviderReference = (
+  payload,
+) => {
   return (
     payload?.reference ||
     payload?.providerReference ||
@@ -60,14 +64,18 @@ const getProviderReference = (payload) => {
 // EXTRACT AUTHORIZATION CODE
 // =========================================================
 
-const getAuthorizationCode = (payload) => {
+const getAuthorizationCode = (
+  payload,
+) => {
   return (
     payload?.authorization_code ||
     payload?.authorizationCode ||
-    payload?.authorization?.authorization_code ||
+    payload?.authorization
+      ?.authorization_code ||
     payload?.data?.authorization_code ||
     payload?.data?.authorizationCode ||
-    payload?.data?.authorization?.authorization_code ||
+    payload?.data?.authorization
+      ?.authorization_code ||
     null
   );
 };
@@ -76,7 +84,9 @@ const getAuthorizationCode = (payload) => {
 // EXTRACT PROVIDER CUSTOMER ID
 // =========================================================
 
-const getProviderCustomerId = (payload) => {
+const getProviderCustomerId = (
+  payload,
+) => {
   return (
     payload?.customer?.code ||
     payload?.customer?.customer_code ||
@@ -92,15 +102,24 @@ const getProviderCustomerId = (payload) => {
 // EXTRACT CUSTOMER EMAIL
 // =========================================================
 
-const getCustomerEmail = (payload) => {
-  return payload?.customer?.email || payload?.data?.customer?.email || null;
+const getCustomerEmail = (
+  payload,
+) => {
+  return (
+    payload?.customer?.email ||
+    payload?.data?.customer?.email ||
+    null
+  );
 };
 
 // =========================================================
 // EXTRACT FAILURE REASON
 // =========================================================
 
-const getFailureReason = (payload, fallback) => {
+const getFailureReason = (
+  payload,
+  fallback,
+) => {
   return (
     payload?.message ||
     payload?.error ||
@@ -110,6 +129,8 @@ const getFailureReason = (payload, fallback) => {
     payload?.data?.error ||
     payload?.data?.reason ||
     payload?.data?.failures?.message ||
+    payload?.data?.dedicated_account?.message ||
+    payload?.data?.dedicated_account?.reason ||
     fallback
   );
 };
@@ -118,7 +139,9 @@ const getFailureReason = (payload, fallback) => {
 // EXTRACT REPAYMENT REFERENCE
 // =========================================================
 
-const getRepaymentReference = (payload) => {
+const getRepaymentReference = (
+  payload,
+) => {
   return (
     payload?.reference ||
     payload?.paymentReference ||
@@ -132,7 +155,9 @@ const getRepaymentReference = (payload) => {
 // EXTRACT DISBURSEMENT REFERENCE
 // =========================================================
 
-const getDisbursementReference = (payload) => {
+const getDisbursementReference = (
+  payload,
+) => {
   return (
     payload?.reference ||
     payload?.providerReference ||
@@ -146,7 +171,9 @@ const getDisbursementReference = (payload) => {
 // EXTRACT TRANSFER CODE
 // =========================================================
 
-const getTransferCode = (payload) => {
+const getTransferCode = (
+  payload,
+) => {
   return (
     payload?.transfer_code ||
     payload?.transferCode ||
@@ -160,7 +187,9 @@ const getTransferCode = (payload) => {
 // EXTRACT TRANSFER ID
 // =========================================================
 
-const getTransferId = (payload) => {
+const getTransferId = (
+  payload,
+) => {
   return (
     payload?.id ||
     payload?.transfer_id ||
@@ -173,130 +202,231 @@ const getTransferId = (payload) => {
 };
 
 // =========================================================
-// EXTRACT DVA CUSTOMER CODE
+// DVA CUSTOMER CODE
 // =========================================================
 
-const getDvaCustomerCode = (payload) => {
+const getDvaCustomerCode = (
+  payload,
+) => {
   const value =
-    payload?.data?.customer?.customer_code ||
+    payload?.data?.customer
+      ?.customer_code ||
     payload?.data?.customer?.code ||
     payload?.data?.customer_code ||
-    payload?.customer?.customer_code ||
+    payload?.customer
+      ?.customer_code ||
     payload?.customer?.code ||
     payload?.customer_code ||
     null;
 
-  return value ? String(value).trim() : null;
+  return value
+    ? String(value).trim()
+    : null;
 };
 
 // =========================================================
-// EXTRACT DVA PROVIDER ACCOUNT ID
+// DVA ACCOUNT NUMBER
 // =========================================================
 
-const getDvaProviderAccountId = (payload) => {
+const getDvaAccountNumber = (
+  payload,
+) => {
+  const value =
+    payload?.data?.account_number ||
+    payload?.data?.account
+      ?.account_number ||
+    payload?.data?.dedicated_account
+      ?.account_number ||
+    payload?.account_number ||
+    payload?.account?.account_number ||
+    payload?.dedicated_account
+      ?.account_number ||
+    null;
+
+  return value
+    ? String(value).trim()
+    : null;
+};
+
+// =========================================================
+// DVA PROVIDER ACCOUNT ID
+// =========================================================
+
+const getDvaProviderAccountId = (
+  payload,
+) => {
   const value =
     payload?.data?.id ||
     payload?.data?.dedicated_account_id ||
     payload?.data?.account_id ||
+    payload?.data?.dedicated_account?.id ||
     payload?.id ||
     payload?.dedicated_account_id ||
     payload?.account_id ||
+    payload?.dedicated_account?.id ||
     null;
 
-  return value !== null && value !== undefined ? String(value).trim() : null;
+  return value !== null &&
+    value !== undefined
+    ? String(value).trim()
+    : null;
 };
 
 // =========================================================
-// EXTRACT DVA ACCOUNT NUMBER
+// DVA ACCOUNT NAME
 // =========================================================
 
-const getDvaAccountNumber = (payload) => {
+const getDvaAccountName = (
+  payload,
+) => {
   const value =
-    payload?.data?.account_number || payload?.account_number || null;
-
-  return value ? String(value).trim() : null;
-};
-
-// =========================================================
-// EXTRACT DVA RECEIVING ACCOUNT NUMBER
-// =========================================================
-
-const getDvaReceivingAccountNumber = (payload) => {
-  const accountNumber =
-    payload?.data?.authorization?.receiver_bank_account_number ||
-    payload?.data?.receiver_bank_account_number ||
-    payload?.data?.account_number ||
-    payload?.authorization?.receiver_bank_account_number ||
-    payload?.receiver_bank_account_number ||
-    payload?.account_number ||
+    payload?.data?.account_name ||
+    payload?.data?.account
+      ?.account_name ||
+    payload?.data?.dedicated_account
+      ?.account_name ||
+    payload?.account_name ||
+    payload?.account?.account_name ||
+    payload?.dedicated_account
+      ?.account_name ||
     null;
 
-  return accountNumber ? String(accountNumber).trim() : null;
+  return value
+    ? String(value).trim()
+    : null;
 };
 
 // =========================================================
-// EXTRACT DVA ACCOUNT NAME
+// DVA BANK NAME
 // =========================================================
 
-const getDvaAccountName = (payload) => {
-  return payload?.data?.account_name || payload?.account_name || null;
-};
-
-// =========================================================
-// EXTRACT DVA BANK NAME
-// =========================================================
-
-const getDvaBankName = (payload) => {
-  return (
+const getDvaBankName = (
+  payload,
+) => {
+  const value =
     payload?.data?.bank?.name ||
     payload?.data?.bank_name ||
+    payload?.data?.account?.bank
+      ?.name ||
+    payload?.data?.dedicated_account
+      ?.bank?.name ||
     payload?.bank?.name ||
     payload?.bank_name ||
-    null
-  );
+    null;
+
+  return value
+    ? String(value).trim()
+    : null;
 };
 
 // =========================================================
-// EXTRACT DVA BANK CODE
+// DVA BANK CODE
 // =========================================================
 
-const getDvaBankCode = (payload) => {
-  return (
+const getDvaBankCode = (
+  payload,
+) => {
+  const value =
     payload?.data?.bank?.code ||
     payload?.data?.bank_code ||
+    payload?.data?.account?.bank
+      ?.code ||
+    payload?.data?.dedicated_account
+      ?.bank?.code ||
     payload?.bank?.code ||
     payload?.bank_code ||
-    null
-  );
+    null;
+
+  return value
+    ? String(value).trim()
+    : null;
 };
 
 // =========================================================
-// EXTRACT DVA CURRENCY
+// DVA CURRENCY
 // =========================================================
 
-const getDvaCurrency = (payload) => {
-  return payload?.data?.currency || payload?.currency || "NGN";
+const getDvaCurrency = (
+  payload,
+) => {
+  const value =
+    payload?.data?.currency ||
+    payload?.data?.account?.currency ||
+    payload?.data?.dedicated_account
+      ?.currency ||
+    payload?.currency ||
+    "NGN";
+
+  return String(value)
+    .trim()
+    .toUpperCase();
+};
+
+// =========================================================
+// DVA RECEIVING ACCOUNT NUMBER
+// =========================================================
+
+const getDvaReceivingAccountNumber = (
+  payload,
+) => {
+  const accountNumber =
+    payload?.data?.authorization
+      ?.receiver_bank_account_number ||
+    payload?.data
+      ?.receiver_bank_account_number ||
+    payload?.data?.account_number ||
+    payload?.data?.account
+      ?.account_number ||
+    payload?.authorization
+      ?.receiver_bank_account_number ||
+    payload?.receiver_bank_account_number ||
+    payload?.account_number ||
+    payload?.account?.account_number ||
+    null;
+
+  return accountNumber
+    ? String(accountNumber).trim()
+    : null;
 };
 
 // =========================================================
 // DETECT DVA CHARGE
 // =========================================================
 
-const isDedicatedVirtualAccountCharge = (payload) => {
-  const data = payload?.data || payload || {};
+const isDedicatedVirtualAccountCharge = (
+  payload,
+) => {
+  const data =
+    payload?.data ||
+    payload ||
+    {};
 
-  const authorization = data?.authorization || {};
+  const authorization =
+    data?.authorization ||
+    {};
 
-  const accountNumber = getDvaReceivingAccountNumber(payload);
+  const accountNumber =
+    getDvaReceivingAccountNumber(
+      payload,
+    );
 
-  const channel = String(authorization?.channel || data?.channel || "")
+  const channel = String(
+    authorization?.channel ||
+      data?.channel ||
+      "",
+  )
     .trim()
     .toLowerCase();
 
   return (
-    channel === "dedicated_nuban" ||
-    (channel === "transfer" && !!accountNumber) ||
-    !!authorization?.receiver_bank_account_number
+    channel ===
+      "dedicated_nuban" ||
+    (
+      channel === "transfer" &&
+      !!accountNumber
+    ) ||
+    !!authorization
+      ?.receiver_bank_account_number
   );
 };
 
@@ -304,110 +434,181 @@ const isDedicatedVirtualAccountCharge = (payload) => {
 // FIND MANDATE
 // =========================================================
 
-const findMandateFromPayload = async (payload, eventType = null) => {
-  const providerReference = getProviderReference(payload);
+const findMandateFromPayload =
+  async (
+    payload,
+    eventType = null,
+  ) => {
+    const providerReference =
+      getProviderReference(
+        payload,
+      );
 
-  const authorizationCode = getAuthorizationCode(payload);
+    const authorizationCode =
+      getAuthorizationCode(
+        payload,
+      );
 
-  const providerCustomerId = getProviderCustomerId(payload);
+    const providerCustomerId =
+      getProviderCustomerId(
+        payload,
+      );
 
-  if (providerReference) {
-    let mandate = await MandateRepository.findByProviderId(providerReference);
+    // -----------------------------------------------------
+    // PROVIDER REFERENCE
+    // -----------------------------------------------------
 
-    if (mandate) {
-      return mandate;
-    }
+    if (providerReference) {
+      let mandate =
+        await MandateRepository
+          .findByProviderId(
+            providerReference,
+          );
 
-    mandate = await MandateRepository.findByReference(providerReference);
+      if (mandate) {
+        return mandate;
+      }
 
-    if (mandate) {
-      return mandate;
-    }
-  }
-
-  if (authorizationCode) {
-    const mandate =
-      await MandateRepository.findByAuthorizationCode(authorizationCode);
-
-    if (mandate) {
-      return mandate;
-    }
-  }
-
-  if (providerCustomerId) {
-    let mandate = null;
-
-    if (eventType === "direct_debit.authorization.created") {
       mandate =
-        await MandateRepository.findPendingByProviderCustomerId(
-          providerCustomerId,
-        );
-    } else if (eventType === "direct_debit.authorization.active") {
-      mandate =
-        await MandateRepository.findByProviderCustomerId(providerCustomerId);
+        await MandateRepository
+          .findByReference(
+            providerReference,
+          );
+
+      if (mandate) {
+        return mandate;
+      }
     }
 
-    if (!mandate) {
-      mandate =
-        await MandateRepository.findByProviderCustomerId(providerCustomerId);
+    // -----------------------------------------------------
+    // AUTHORIZATION CODE
+    // -----------------------------------------------------
+
+    if (authorizationCode) {
+      const mandate =
+        await MandateRepository
+          .findByAuthorizationCode(
+            authorizationCode,
+          );
+
+      if (mandate) {
+        return mandate;
+      }
     }
 
-    if (mandate) {
-      return mandate;
+    // -----------------------------------------------------
+    // CUSTOMER
+    // -----------------------------------------------------
+
+    if (providerCustomerId) {
+      let mandate = null;
+
+      if (
+        eventType ===
+        "direct_debit.authorization.created"
+      ) {
+        mandate =
+          await MandateRepository
+            .findPendingByProviderCustomerId(
+              providerCustomerId,
+            );
+      } else if (
+        eventType ===
+        "direct_debit.authorization.active"
+      ) {
+        mandate =
+          await MandateRepository
+            .findByProviderCustomerId(
+              providerCustomerId,
+            );
+      }
+
+      if (!mandate) {
+        mandate =
+          await MandateRepository
+            .findByProviderCustomerId(
+              providerCustomerId,
+            );
+      }
+
+      if (mandate) {
+        return mandate;
+      }
     }
-  }
 
-  const customerEmail = getCustomerEmail(payload);
+    // -----------------------------------------------------
+    // FAILURE
+    // -----------------------------------------------------
 
-  if (customerEmail) {
-    console.warn(
-      `Unable to match mandate webhook. Customer email: ${customerEmail}`,
-    );
-  }
+    const customerEmail =
+      getCustomerEmail(payload);
 
-  if (providerCustomerId) {
+    if (customerEmail) {
+      console.warn(
+        "Unable to match mandate webhook.",
+      );
+    }
+
+    if (providerCustomerId) {
+      throw createError(
+        `Mandate not found for Paystack customer: ${providerCustomerId}`,
+        404,
+      );
+    }
+
+    if (authorizationCode) {
+      throw createError(
+        "Mandate not found for authorization code",
+        404,
+      );
+    }
+
+    if (providerReference) {
+      throw createError(
+        `Mandate not found: ${providerReference}`,
+        404,
+      );
+    }
+
     throw createError(
-      `Mandate not found for Paystack customer: ${providerCustomerId}`,
+      "Unable to identify mandate from webhook payload",
       404,
     );
-  }
-
-  if (authorizationCode) {
-    throw createError("Mandate not found for authorization code", 404);
-  }
-
-  if (providerReference) {
-    throw createError(`Mandate not found: ${providerReference}`, 404);
-  }
-
-  throw createError("Unable to identify mandate from webhook payload", 404);
-};
+  };
 
 // =========================================================
 // BUILD MANDATE PROVIDER UPDATE
 // =========================================================
 
-const buildMandateProviderUpdate = (payload) => {
+const buildMandateProviderUpdate = (
+  payload,
+) => {
   const update = {
     providerData: payload,
   };
 
-  const providerCustomerId = getProviderCustomerId(payload);
+  const providerCustomerId =
+    getProviderCustomerId(payload);
 
-  const authorizationCode = getAuthorizationCode(payload);
+  const authorizationCode =
+    getAuthorizationCode(payload);
 
-  const providerReference = getProviderReference(payload);
+  const providerReference =
+    getProviderReference(payload);
 
   if (providerCustomerId) {
-    update.providerCustomerId = providerCustomerId;
+    update.providerCustomerId =
+      providerCustomerId;
   }
 
   if (authorizationCode) {
-    update.authorizationCode = authorizationCode;
+    update.authorizationCode =
+      authorizationCode;
   }
 
   if (providerReference) {
-    update.authorizationReference = providerReference;
+    update.authorizationReference =
+      providerReference;
   }
 
   return update;
@@ -417,21 +618,31 @@ const buildMandateProviderUpdate = (payload) => {
 // BUILD DISBURSEMENT PROVIDER RESULT
 // =========================================================
 
-const buildDisbursementProviderResult = (payload) => {
-  const providerReference = getDisbursementReference(payload);
+const buildDisbursementProviderResult = (
+  payload,
+) => {
+  const providerReference =
+    getDisbursementReference(
+      payload,
+    );
 
-  const transferCode = getTransferCode(payload);
+  const transferCode =
+    getTransferCode(payload);
 
-  const transferId = getTransferId(payload);
+  const transferId =
+    getTransferId(payload);
 
   return {
     provider: "paystack",
 
-    reference: providerReference,
+    reference:
+      providerReference,
 
-    transfer_code: transferCode,
+    transfer_code:
+      transferCode,
 
-    id: transferId,
+    id:
+      transferId,
 
     providerReference,
 
@@ -439,99 +650,160 @@ const buildDisbursementProviderResult = (payload) => {
 
     transferId,
 
-    providerData: payload,
+    providerData:
+      payload,
   };
 };
 
 // =========================================================
 // BUILD WEBHOOK EVENT ID
 // =========================================================
+//
+// IMPORTANT:
+// DVA assignment events are handled FIRST.
+//
+// We intentionally do NOT trust an externally supplied
+// eventId for DVA assignment events because Paystack may
+// deliver the same logical assignment more than once.
+//
+// The generated ID must remain stable across deliveries.
+//
+// =========================================================
 
-const buildWebhookEventId = ({ provider, eventId, eventType, payload }) => {
+const buildWebhookEventId = ({
+  provider,
+  eventId,
+  eventType,
+  payload,
+}) => {
+  // -------------------------------------------------------
+  // DVA ASSIGNMENT EVENTS
+  // -------------------------------------------------------
+  //
+  // These must be deterministic.
+  //
+  // Example:
+  //
+  // dedicatedaccount.assign.success:
+  // CUS_tro5bi4kchjgg66:
+  // 9817979910
+  //
+  // Every repeated Paystack delivery gets the same ID.
+  //
+  // -------------------------------------------------------
+
+  if (
+    eventType ===
+      "dedicatedaccount.assign.success" ||
+    eventType ===
+      "dedicatedaccount.assign.failed"
+  ) {
+    const customerCode =
+      getDvaCustomerCode(payload);
+
+    const accountNumber =
+      getDvaAccountNumber(payload);
+
+    const accountId =
+      getDvaProviderAccountId(payload);
+
+    // -----------------------------------------------------
+    // Prefer the most specific stable identity.
+    // -----------------------------------------------------
+
+    const identity =
+      accountNumber ||
+      accountId ||
+      customerCode ||
+      "unknown-account";
+
+    return [
+      eventType,
+
+      customerCode ||
+        "unknown-customer",
+
+      identity,
+    ]
+      .join(":")
+      .slice(0, 500);
+  }
+
+  // -------------------------------------------------------
+  // NORMAL PROVIDER-SUPPLIED EVENT ID
+  // -------------------------------------------------------
+
   if (eventId) {
     return String(eventId).trim();
   }
 
-  const providerReference = getProviderReference(payload);
+  // -------------------------------------------------------
+  // NORMAL PROVIDER REFERENCE
+  // -------------------------------------------------------
 
-  if (provider === "paystack" && providerReference) {
+  const providerReference =
+    getProviderReference(payload);
+
+  if (
+    provider === "paystack" &&
+    providerReference
+  ) {
     return `${eventType}:${providerReference}`;
   }
 
-  const providerId = payload?.id || payload?.data?.id || null;
+  // -------------------------------------------------------
+  // PROVIDER OBJECT ID
+  // -------------------------------------------------------
+
+  const providerId =
+    payload?.id ||
+    payload?.data?.id ||
+    null;
 
   if (providerId) {
     return `${eventType}:${providerId}`;
   }
 
   // -------------------------------------------------------
-  // DVA ASSIGNMENT
+  // NOTHING AVAILABLE
   // -------------------------------------------------------
 
-  // -------------------------------------------------------
-  // DVA ASSIGNMENT
-  // -------------------------------------------------------
-
-  if (
-    eventType === "dedicatedaccount.assign.success" ||
-    eventType === "dedicatedaccount.assign.failed"
-  ) {
-    const customerCode = getDvaCustomerCode(payload);
-
-    const accountNumber = getDvaAccountNumber(payload);
-
-    const accountId = getDvaProviderAccountId(payload);
-
-    const failureReason =
-      eventType === "dedicatedaccount.assign.failed"
-        ? getFailureReason(payload, "unknown-reason")
-        : null;
-
-    if (customerCode || accountNumber || accountId || failureReason) {
-      return [
-        eventType,
-        customerCode || "unknown-customer",
-        accountNumber || accountId || "unknown-account",
-        failureReason || "",
-      ]
-        .filter(Boolean)
-        .join(":")
-        .slice(0, 500);
-    }
-  }
-
-  throw createError("Webhook event ID could not be determined");
+  throw createError(
+    "Webhook event ID could not be determined",
+  );
 };
 
 // =========================================================
 // SUPPORTED PAYSTACK EVENTS
 // =========================================================
 
-const supportedPaystackEvents = new Set([
-  // DVA
-  "dedicatedaccount.assign.success",
-  "dedicatedaccount.assign.failed",
-  // Payments
-  "charge.success",
-  "charge.failed",
+const supportedPaystackEvents =
+  new Set([
+    // DVA
+    "dedicatedaccount.assign.success",
+    "dedicatedaccount.assign.failed",
 
-  // Direct debit / mandate
-  "direct_debit.authorization.created",
-  "direct_debit.authorization.active",
+    // Payments
+    "charge.success",
+    "charge.failed",
 
-  // Legacy / normalized mandate events
-  "mandate.authorized",
-  "mandate.active",
-  "mandate.failed",
-  "mandate.deactivated",
-  "mandate.cancelled",
-  "mandate.expired",
+    // Direct debit
+    "direct_debit.authorization.created",
+    "direct_debit.authorization.active",
 
-  // Transfers
-  "transfer.success",
-  "transfer.failed",
-  "transfer.reversed",
-]);
+    // Legacy / normalized mandate events
+    "mandate.authorized",
+    "mandate.active",
+    "mandate.failed",
+    "mandate.deactivated",
+    "mandate.cancelled",
+    "mandate.expired",
+
+    // Transfers
+    "transfer.success",
+    "transfer.failed",
+    "transfer.reversed",
+  ]);
 
 // =========================================================
 // PROCESS WEBHOOK
@@ -546,106 +818,164 @@ const processWebhook = async ({
   signature,
   trustedInternalWebhook = false,
 }) => {
+  // -------------------------------------------------------
+  // PROVIDER
+  // -------------------------------------------------------
+
   if (!provider) {
-    throw createError("Webhook provider is required");
+    throw createError(
+      "Webhook provider is required",
+    );
   }
 
-  const normalizedProvider = String(provider).trim().toLowerCase();
+  const normalizedProvider =
+    String(provider)
+      .trim()
+      .toLowerCase();
 
-  const normalizedEventType = normalizeEventType(eventType);
+  // -------------------------------------------------------
+  // EVENT TYPE
+  // -------------------------------------------------------
+
+  const normalizedEventType =
+    normalizeEventType(eventType);
 
   if (!normalizedEventType) {
-    throw createError("Webhook event type is required");
+    throw createError(
+      "Webhook event type is required",
+    );
   }
 
-  // =======================================================
+  // -------------------------------------------------------
   // PROVIDER VALIDATION
-  // =======================================================
+  // -------------------------------------------------------
 
-  if (normalizedProvider !== "paystack") {
+  if (
+    normalizedProvider !==
+    "paystack"
+  ) {
     throw createError(
       `Unsupported webhook provider: ${normalizedProvider}`,
       400,
     );
   }
 
-  // =======================================================
+  // -------------------------------------------------------
   // PAYLOAD VALIDATION
-  // =======================================================
+  // -------------------------------------------------------
 
-  if (!payload || typeof payload !== "object") {
-    throw createError("Webhook payload is required", 400);
+  if (
+    !payload ||
+    typeof payload !== "object"
+  ) {
+    throw createError(
+      "Webhook payload is required",
+      400,
+    );
   }
 
-  // =======================================================
+  // -------------------------------------------------------
   // SIGNATURE VALIDATION
-  // =======================================================
+  // -------------------------------------------------------
 
   if (!trustedInternalWebhook) {
     if (!signature) {
-      throw createError("Webhook signature is required", 401);
+      throw createError(
+        "Webhook signature is required",
+        401,
+      );
     }
 
-    const valid = await verifyWebhookSignature({
-      payload: rawBody || payload,
-      signature,
-    });
+    const valid =
+      await verifyWebhookSignature({
+        payload:
+          rawBody || payload,
+
+        signature,
+      });
 
     if (!valid) {
-      throw createError("Invalid webhook signature", 401);
+      throw createError(
+        "Invalid webhook signature",
+        401,
+      );
     }
   }
 
-  // =======================================================
-  // IGNORE UNSUPPORTED EVENTS
-  // =======================================================
+  // -------------------------------------------------------
+  // SUPPORTED EVENTS
+  // -------------------------------------------------------
 
-  if (!supportedPaystackEvents.has(normalizedEventType)) {
+  if (
+    !supportedPaystackEvents.has(
+      normalizedEventType,
+    )
+  ) {
     console.log(
-      `Ignoring unsupported Paystack webhook event: ${normalizedEventType}`,
+      `ℹ️ IGNORING UNSUPPORTED PAYSTACK WEBHOOK: ${normalizedEventType}`,
     );
 
     return {
       success: true,
+
       ignored: true,
-      eventType: normalizedEventType,
+
+      eventType:
+        normalizedEventType,
     };
   }
 
-  // =======================================================
-  // EVENT ID
-  // =======================================================
+  // -------------------------------------------------------
+  // BUILD DETERMINISTIC EVENT ID
+  // -------------------------------------------------------
 
-  const normalizedEventId = buildWebhookEventId({
-    provider: normalizedProvider,
+  const normalizedEventId =
+    buildWebhookEventId({
+      provider:
+        normalizedProvider,
 
-    eventId,
+      eventId,
 
-    eventType: normalizedEventType,
+      eventType:
+        normalizedEventType,
 
-    payload,
-  });
+      payload,
+    });
 
-  // =======================================================
-  // PROVIDER DATA
-  // =======================================================
+  // -------------------------------------------------------
+  // PROVIDER REFERENCE
+  // -------------------------------------------------------
 
-  const providerReference = getProviderReference(payload);
+  const providerReference =
+    getProviderReference(payload);
 
-  // =======================================================
-  // IDEMPOTENCY LOOKUP
-  // =======================================================
+  // -------------------------------------------------------
+  // RAW BODY
+  // -------------------------------------------------------
 
-  let existingWebhook = null;
+  const normalizedRawBody =
+    rawBody
+      ? Buffer.isBuffer(rawBody)
+        ? rawBody.toString("utf8")
+        : String(rawBody)
+      : null;
 
-  try {
-    existingWebhook = await WebhookRepository.findByEventId(
-      normalizedProvider,
-      normalizedEventId,
-    );
-  } catch (error) {
-    console.warn("WEBHOOK IDEMPOTENCY LOOKUP WARNING:", error.message);
-  }
+  // -------------------------------------------------------
+  // FIND EXISTING WEBHOOK
+  // -------------------------------------------------------
+
+  let existingWebhook =
+    await WebhookRepository
+      .findByEventId(
+        normalizedProvider,
+        normalizedEventId,
+      );
+
+  // -------------------------------------------------------
+  // PROCESSING TOKEN
+  // -------------------------------------------------------
+
+  let processingToken = null;
 
   // =======================================================
   // EXISTING WEBHOOK
@@ -656,147 +986,284 @@ const processWebhook = async ({
     // ALREADY PROCESSED
     // -----------------------------------------------------
 
-    if (existingWebhook.status === "processed") {
-      console.log("WEBHOOK ALREADY PROCESSED:", normalizedEventId);
+    if (
+      existingWebhook.status ===
+      "processed"
+    ) {
+      console.log(
+        "ℹ️ WEBHOOK ALREADY PROCESSED:",
+        {
+          eventId:
+            normalizedEventId,
+
+          eventType:
+            normalizedEventType,
+        },
+      );
 
       return {
         success: true,
+
         duplicate: true,
 
-        eventId: normalizedEventId,
+        processed: true,
 
-        eventType: normalizedEventType,
+        eventId:
+          normalizedEventId,
+
+        eventType:
+          normalizedEventType,
       };
     }
 
     // -----------------------------------------------------
-    // FAILED OR STALE PROCESSING
-    // -----------------------------------------------------
-    //
-    // Try to acquire processing ownership.
-    //
-    // WebhookRepository.markProcessing()
-    // only returns a document when this request
-    // successfully acquires the webhook.
-    //
-    // If it returns null, another request is
-    // currently processing it.
+    // TRY TO ACQUIRE PROCESSING OWNERSHIP
     // -----------------------------------------------------
 
-    const processingWebhook = await WebhookRepository.markProcessing(
-      normalizedProvider,
-      normalizedEventId,
-    );
+    const acquired =
+      await WebhookRepository
+        .markProcessing(
+          normalizedProvider,
+          normalizedEventId,
+        );
 
-    if (!processingWebhook) {
-      console.log("WEBHOOK CURRENTLY BEING PROCESSED:", normalizedEventId);
+    // -----------------------------------------------------
+    // SOMEONE ELSE OWNS IT
+    // -----------------------------------------------------
+
+    if (!acquired) {
+      console.log(
+        "ℹ️ WEBHOOK CURRENTLY BEING PROCESSED:",
+        {
+          eventId:
+            normalizedEventId,
+
+          eventType:
+            normalizedEventType,
+
+          status:
+            existingWebhook.status,
+        },
+      );
 
       return {
         success: true,
+
         duplicate: true,
+
         processing: true,
 
-        eventId: normalizedEventId,
+        eventId:
+          normalizedEventId,
 
-        eventType: normalizedEventType,
+        eventType:
+          normalizedEventType,
       };
     }
 
-    console.log("RETRYING WEBHOOK:", {
-      eventId: normalizedEventId,
+    // -----------------------------------------------------
+    // OWNERSHIP ACQUIRED
+    // -----------------------------------------------------
 
-      previousStatus: existingWebhook.status,
+    existingWebhook =
+      acquired.document;
 
-      attempts: processingWebhook.attempts,
-    });
+    processingToken =
+      acquired.processingToken;
 
-    // Continue below and process the event.
+    console.log(
+      "🔄 WEBHOOK PROCESSING ACQUIRED:",
+      {
+        eventId:
+          normalizedEventId,
+
+        eventType:
+          normalizedEventType,
+
+        previousStatus:
+          existingWebhook.status,
+
+        attempts:
+          existingWebhook.attempts,
+      },
+    );
   }
 
   // =======================================================
   // NEW WEBHOOK
   // =======================================================
 
-  let webhookRecord = existingWebhook;
-
-  if (!webhookRecord) {
+  if (!existingWebhook) {
     try {
-      webhookRecord = await WebhookRepository.create({
-        provider: normalizedProvider,
+      existingWebhook =
+        await WebhookRepository
+          .create({
+            provider:
+              normalizedProvider,
 
-        eventId: normalizedEventId,
+            eventId:
+              normalizedEventId,
 
-        eventType: normalizedEventType,
+            eventType:
+              normalizedEventType,
 
-        providerReference: providerReference || null,
+            providerReference:
+              providerReference ||
+              null,
 
-        payload,
+            payload,
 
-        rawBody: rawBody
-          ? Buffer.isBuffer(rawBody)
-            ? rawBody.toString("utf8")
-            : String(rawBody)
-          : null,
+            rawBody:
+              normalizedRawBody,
 
-        signature: signature || null,
+            signature:
+              signature || null,
 
-        status: "processing",
+            status:
+              "processing",
 
-        processingAt: new Date(),
+            processingAt:
+              new Date(),
 
-        receivedAt: new Date(),
+            receivedAt:
+              new Date(),
 
-        attempts: 1,
-      });
+            // IMPORTANT:
+            //
+            // Do NOT send attempts: 0.
+            //
+            // Repository creates first attempt as 1.
+          });
+
+      processingToken =
+        existingWebhook
+          .processingToken;
+
+      console.log(
+        "🆕 NEW WEBHOOK PROCESSING:",
+        {
+          eventId:
+            normalizedEventId,
+
+          eventType:
+            normalizedEventType,
+
+          attempts:
+            existingWebhook.attempts,
+        },
+      );
     } catch (error) {
-      // ---------------------------------------------------
-      // CONCURRENT REQUEST
-      // ---------------------------------------------------
+      // ===================================================
+      // CONCURRENT INSERT
+      // ===================================================
 
       if (
         error?.code === 11000 ||
-        /duplicate/i.test(String(error?.message || ""))
+        /duplicate/i.test(
+          String(
+            error?.message || "",
+          ),
+        )
       ) {
-        console.log("WEBHOOK DUPLICATE INSERT DETECTED:", normalizedEventId);
-
-        // The other request won the insert race.
-        //
-        // Check the current state and attempt to acquire
-        // processing only if appropriate.
-        const concurrentWebhook = await WebhookRepository.findByEventId(
-          normalizedProvider,
+        console.log(
+          "ℹ️ CONCURRENT WEBHOOK INSERT DETECTED:",
           normalizedEventId,
         );
 
-        if (concurrentWebhook?.status === "processed") {
+        const concurrentWebhook =
+          await WebhookRepository
+            .findByEventId(
+              normalizedProvider,
+              normalizedEventId,
+            );
+
+        // -----------------------------------------------
+        // NO RECORD FOUND
+        // -----------------------------------------------
+
+        if (!concurrentWebhook) {
+          throw createError(
+            "Webhook duplicate insert detected but existing record could not be found",
+            500,
+          );
+        }
+
+        // -----------------------------------------------
+        // ALREADY PROCESSED
+        // -----------------------------------------------
+
+        if (
+          concurrentWebhook.status ===
+          "processed"
+        ) {
+          console.log(
+            "ℹ️ CONCURRENT WEBHOOK ALREADY PROCESSED:",
+            normalizedEventId,
+          );
+
           return {
             success: true,
+
             duplicate: true,
 
-            eventId: normalizedEventId,
+            processed: true,
 
-            eventType: normalizedEventType,
+            eventId:
+              normalizedEventId,
+
+            eventType:
+              normalizedEventType,
           };
         }
 
-        const acquired = await WebhookRepository.markProcessing(
-          normalizedProvider,
-          normalizedEventId,
-        );
+        // -----------------------------------------------
+        // TRY TO ACQUIRE
+        // -----------------------------------------------
+
+        const acquired =
+          await WebhookRepository
+            .markProcessing(
+              normalizedProvider,
+              normalizedEventId,
+            );
 
         if (!acquired) {
+          console.log(
+            "ℹ️ CONCURRENT WEBHOOK OWNED BY ANOTHER WORKER:",
+            normalizedEventId,
+          );
+
           return {
             success: true,
+
             duplicate: true,
+
             processing: true,
 
-            eventId: normalizedEventId,
+            eventId:
+              normalizedEventId,
 
-            eventType: normalizedEventType,
+            eventType:
+              normalizedEventType,
           };
         }
 
-        webhookRecord = acquired;
+        existingWebhook =
+          acquired.document;
+
+        processingToken =
+          acquired.processingToken;
+
+        console.log(
+          "🔐 WEBHOOK OWNERSHIP ACQUIRED AFTER DUPLICATE INSERT:",
+          {
+            eventId:
+              normalizedEventId,
+
+            attempts:
+              existingWebhook.attempts,
+          },
+        );
       } else {
         throw error;
       }
@@ -804,48 +1271,116 @@ const processWebhook = async ({
   }
 
   // =======================================================
-  // DISPATCH EVENT
+  // FINAL OWNERSHIP CHECK
   // =======================================================
 
-  let result;
+  if (!processingToken) {
+    throw createError(
+      "Webhook processing token could not be acquired",
+      500,
+    );
+  }
+
+  // =======================================================
+  // PROCESS EVENT
+  // =======================================================
 
   try {
-    result = await handleEvent(normalizedEventType, payload);
+    const result =
+      await handleEvent(
+        normalizedEventType,
+        payload,
+      );
 
     // =====================================================
     // MARK PROCESSED
     // =====================================================
 
-    await WebhookRepository.markProcessed(
-      normalizedProvider,
-      normalizedEventId,
+    const processedWebhook =
+      await WebhookRepository
+        .markProcessed(
+          normalizedProvider,
+          normalizedEventId,
+          processingToken,
+          {
+            result:
+              result || null,
+          },
+        );
+
+    // =====================================================
+    // OWNERSHIP LOST
+    // =====================================================
+
+    if (!processedWebhook) {
+      console.warn(
+        "⚠️ WEBHOOK PROCESSING OWNERSHIP LOST:",
+        {
+          eventId:
+            normalizedEventId,
+
+          eventType:
+            normalizedEventType,
+        },
+      );
+
+      return {
+        success: true,
+
+        processed: false,
+
+        ownershipLost: true,
+
+        eventId:
+          normalizedEventId,
+
+        eventType:
+          normalizedEventType,
+      };
+    }
+
+    // =====================================================
+    // SUCCESS
+    // =====================================================
+
+    console.log(
+      "✅ PAYMENT WEBHOOK PROCESSED:",
       {
-        result: result || null,
+        provider:
+          normalizedProvider,
+
+        eventId:
+          normalizedEventId,
+
+        eventType:
+          normalizedEventType,
+
+        reference:
+          providerReference ||
+          null,
+
+        attempts:
+          processedWebhook.attempts,
       },
     );
-
-    console.log("PAYMENT WEBHOOK PROCESSED:", {
-      provider: normalizedProvider,
-
-      eventId: normalizedEventId,
-
-      eventType: normalizedEventType,
-
-      reference: providerReference || null,
-    });
 
     return {
       success: true,
 
       processed: true,
 
-      eventId: normalizedEventId,
+      eventId:
+        normalizedEventId,
 
-      eventType: normalizedEventType,
+      eventType:
+        normalizedEventType,
 
-      reference: providerReference || null,
+      reference:
+        providerReference ||
+        null,
 
-      result: result || null,
+      result:
+        result || null,
     };
   } catch (error) {
     // =====================================================
@@ -853,27 +1388,62 @@ const processWebhook = async ({
     // =====================================================
 
     try {
-      await WebhookRepository.markFailed(
-        normalizedProvider,
-        normalizedEventId,
-        error?.message || "Webhook processing failed",
-      );
+      const failedWebhook =
+        await WebhookRepository
+          .markFailed(
+            normalizedProvider,
+            normalizedEventId,
+            processingToken,
+            error?.message ||
+              "Webhook processing failed",
+          );
+
+      if (!failedWebhook) {
+        console.warn(
+          "⚠️ WEBHOOK FAILURE OWNERSHIP LOST:",
+          {
+            eventId:
+              normalizedEventId,
+
+            eventType:
+              normalizedEventType,
+          },
+        );
+      }
     } catch (updateError) {
       console.error(
-        "FAILED TO UPDATE WEBHOOK FAILURE STATUS:",
-        updateError.message,
+        "❌ FAILED TO UPDATE WEBHOOK FAILURE STATUS:",
+        {
+          eventId:
+            normalizedEventId,
+
+          updateError:
+            updateError.message,
+        },
       );
     }
 
-    console.error("PAYMENT WEBHOOK PROCESSING FAILED:", {
-      eventId: normalizedEventId,
+    console.error(
+      "❌ PAYMENT WEBHOOK PROCESSING FAILED:",
+      {
+        provider:
+          normalizedProvider,
 
-      eventType: normalizedEventType,
+        eventId:
+          normalizedEventId,
 
-      reference: providerReference || null,
+        eventType:
+          normalizedEventType,
 
-      error: error?.message || error,
-    });
+        reference:
+          providerReference ||
+          null,
+
+        error:
+          error?.message ||
+          error,
+      },
+    );
 
     throw error;
   }
@@ -883,875 +1453,1475 @@ const processWebhook = async ({
 // EVENT HANDLER
 // =========================================================
 
-const handleEvent = async (eventType, payload) => {
+const handleEvent = async (
+  eventType,
+  payload,
+) => {
   switch (eventType) {
     // =====================================================
-    // DEDICATED VIRTUAL ACCOUNT
+    // DVA
     // =====================================================
 
     case "dedicatedaccount.assign.success":
-      return handleDedicatedAccountAssignSuccess(payload);
+      return handleDedicatedAccountAssignSuccess(
+        payload,
+      );
 
     case "dedicatedaccount.assign.failed":
-      return handleDedicatedAccountAssignFailed(payload);
+      return handleDedicatedAccountAssignFailed(
+        payload,
+      );
 
     // =====================================================
-    // DIRECT DEBIT / MANDATES
+    // MANDATES
     // =====================================================
 
     case "direct_debit.authorization.created":
-      return handleMandateAuthorized(payload, eventType);
+      return handleMandateAuthorized(
+        payload,
+        eventType,
+      );
 
     case "direct_debit.authorization.active":
-      return handleMandateActive(payload, eventType);
+      return handleMandateActive(
+        payload,
+        eventType,
+      );
 
     case "mandate.authorized":
-      return handleMandateAuthorized(payload, eventType);
+      return handleMandateAuthorized(
+        payload,
+        eventType,
+      );
 
     case "mandate.active":
-      return handleMandateActive(payload, eventType);
+      return handleMandateActive(
+        payload,
+        eventType,
+      );
 
     case "mandate.failed":
-      return handleMandateFailed(payload, eventType);
+      return handleMandateFailed(
+        payload,
+        eventType,
+      );
 
     case "mandate.deactivated":
     case "mandate.cancelled":
-      return handleMandateCancelled(payload, eventType);
+      return handleMandateCancelled(
+        payload,
+        eventType,
+      );
 
     case "mandate.expired":
-      return handleMandateExpired(payload, eventType);
+      return handleMandateExpired(
+        payload,
+        eventType,
+      );
 
     // =====================================================
     // PAYMENTS
     // =====================================================
 
     case "charge.success":
-      return handleChargeSuccess(payload);
+      return handleChargeSuccess(
+        payload,
+      );
 
     case "charge.failed":
-      return handleChargeFailed(payload);
+      return handleChargeFailed(
+        payload,
+      );
 
     // =====================================================
     // DISBURSEMENTS
     // =====================================================
 
     case "transfer.success":
-      return handleDisbursementSuccess(payload);
+      return handleDisbursementSuccess(
+        payload,
+      );
 
     case "transfer.failed":
-      return handleDisbursementFailed(payload);
+      return handleDisbursementFailed(
+        payload,
+      );
 
     case "transfer.reversed":
-      return handleDisbursementReversed(payload);
+      return handleDisbursementReversed(
+        payload,
+      );
 
     default:
-      console.log(`Unhandled webhook event: ${eventType}`);
+      console.log(
+        `Unhandled webhook event: ${eventType}`,
+      );
 
       return {
         ignored: true,
+
         eventType,
       };
   }
 };
 
 // =========================================================
-// DEDICATED ACCOUNT ASSIGN SUCCESS
+// DVA ASSIGN SUCCESS
 // =========================================================
 
-const handleDedicatedAccountAssignSuccess = async (payload) => {
-  const customerCode = getDvaCustomerCode(payload);
+const handleDedicatedAccountAssignSuccess =
+  async (payload) => {
+    const customerCode =
+      getDvaCustomerCode(payload);
 
-  const providerAccountId = getDvaProviderAccountId(payload);
+    const providerAccountId =
+      getDvaProviderAccountId(payload);
 
-  const accountNumber = getDvaAccountNumber(payload);
+    const accountNumber =
+      getDvaAccountNumber(payload);
 
-  const accountName = getDvaAccountName(payload);
+    const accountName =
+      getDvaAccountName(payload);
 
-  const bankName = getDvaBankName(payload);
+    const bankName =
+      getDvaBankName(payload);
 
-  const bankCode = getDvaBankCode(payload);
+    const bankCode =
+      getDvaBankCode(payload);
 
-  const currency = getDvaCurrency(payload);
+    const currency =
+      getDvaCurrency(payload);
 
-  // -----------------------------------------------------
-  // VALIDATION
-  // -----------------------------------------------------
+    // -----------------------------------------------------
+    // VALIDATION
+    // -----------------------------------------------------
 
-  if (!customerCode && !providerAccountId && !accountNumber) {
-    throw createError(
-      "Unable to identify Paystack dedicated virtual account",
-      400,
-    );
-  }
-
-  // -----------------------------------------------------
-  // FIND LOCAL REPAYMENT ACCOUNT
-  // -----------------------------------------------------
-
-  let account = null;
-
-  // 1. Paystack customer code
-  if (customerCode) {
-    account =
-      await RepaymentAccountRepository.findByProviderCustomerCode(customerCode);
-  }
-
-  // 2. Paystack DVA account ID
-  if (!account && providerAccountId) {
-    account =
-      await RepaymentAccountRepository.findByProviderAccountId(
-        providerAccountId,
+    if (
+      !customerCode &&
+      !providerAccountId &&
+      !accountNumber
+    ) {
+      throw createError(
+        "Unable to identify Paystack dedicated virtual account",
+        400,
       );
-  }
+    }
 
-  // 3. DVA account number
-  if (!account && accountNumber) {
-    account =
-      await RepaymentAccountRepository.findByAccountNumber(accountNumber);
-  }
+    if (!accountNumber) {
+      throw createError(
+        "Paystack DVA assignment succeeded but account number is missing",
+        400,
+      );
+    }
 
-  if (!account) {
-    throw createError(
-      `Repayment account not found for Paystack DVA assignment. Customer: ${customerCode || "unknown"}`,
-      404,
-    );
-  }
+    // -----------------------------------------------------
+    // FIND ACCOUNT
+    // -----------------------------------------------------
 
-  // -----------------------------------------------------
-  // PROVIDER VALIDATION
-  // -----------------------------------------------------
+    let account = null;
 
-  if (account.provider && account.provider !== "paystack") {
-    throw createError(
-      `Repayment account belongs to provider ${account.provider}`,
-      400,
-    );
-  }
+    if (customerCode) {
+      account =
+        await RepaymentAccountRepository
+          .findByProviderCustomerCode(
+            customerCode,
+          );
+    }
 
-  // -----------------------------------------------------
-  // UPDATE DVA
-  // -----------------------------------------------------
+    if (
+      !account &&
+      providerAccountId
+    ) {
+      account =
+        await RepaymentAccountRepository
+          .findByProviderAccountId(
+            providerAccountId,
+          );
+    }
 
-  const updatedAccount =
-    await RepaymentAccountRepository.updateDedicatedVirtualAccount(
-      account._id,
-      {
-        provider: "paystack",
+    if (
+      !account &&
+      accountNumber
+    ) {
+      account =
+        await RepaymentAccountRepository
+          .findByAccountNumber(
+            accountNumber,
+          );
+    }
 
-        dvaStatus: "active",
+    if (!account) {
+      throw createError(
+        `Repayment account not found for Paystack DVA assignment. Customer: ${
+          customerCode ||
+          "unknown"
+        }`,
+        404,
+      );
+    }
 
-        providerCustomerCode: customerCode || account.providerCustomerCode,
+    // -----------------------------------------------------
+    // PROVIDER VALIDATION
+    // -----------------------------------------------------
 
-        providerAccountId: providerAccountId || account.providerAccountId,
+    if (
+      account.provider &&
+      account.provider !==
+        "paystack"
+    ) {
+      throw createError(
+        `Repayment account belongs to provider ${account.provider}`,
+        400,
+      );
+    }
 
-        accountNumber: accountNumber || account.accountNumber,
+    // -----------------------------------------------------
+    // ALREADY ACTIVE
+    // -----------------------------------------------------
 
-        accountName: accountName || account.accountName,
+    const alreadyActive =
+      account.dvaStatus ===
+        "active" &&
+      account.provider ===
+        "paystack" &&
+      account.accountNumber ===
+        accountNumber &&
+      (
+        !providerAccountId ||
+        String(
+          account.providerAccountId ||
+            "",
+        ) ===
+          String(
+            providerAccountId,
+          )
+      );
 
-        bankName: bankName || account.bankName,
+    if (alreadyActive) {
+      console.log(
+        "ℹ️ PAYSTACK DVA ALREADY ACTIVE:",
+        {
+          accountId:
+            account._id,
 
-        bankCode: bankCode || account.bankCode,
+          accountNumber:
+            account.accountNumber,
 
-        currency: currency || account.currency || "NGN",
+          providerAccountId:
+            account.providerAccountId,
 
-        metadata: {
-          ...(account.metadata || {}),
-
-          lastDvaAssignmentWebhook: payload?.data || payload,
+          providerCustomerCode:
+            account.providerCustomerCode,
         },
+      );
+
+      return {
+        processed: true,
+
+        alreadyActive: true,
+
+        type:
+          "dedicated_virtual_account_assignment",
+
+        accountId:
+          account._id,
+
+        userId:
+          account.user,
+
+        dvaStatus:
+          account.dvaStatus,
+
+        provider:
+          account.provider,
+
+        providerCustomerCode:
+          account.providerCustomerCode,
+
+        providerAccountId:
+          account.providerAccountId,
+
+        accountNumber:
+          account.accountNumber,
+
+        accountName:
+          account.accountName,
+
+        bankName:
+          account.bankName,
+
+        bankCode:
+          account.bankCode,
+
+        currency:
+          account.currency,
+      };
+    }
+
+    // -----------------------------------------------------
+    // UPDATE
+    // -----------------------------------------------------
+
+    const update = {
+      provider:
+        "paystack",
+
+      dvaStatus:
+        "active",
+
+      providerCustomerCode:
+        customerCode ||
+        account.providerCustomerCode,
+
+      providerAccountId:
+        providerAccountId ||
+        account.providerAccountId,
+
+      accountNumber,
+
+      accountName:
+        accountName ||
+        account.accountName,
+
+      bankName:
+        bankName ||
+        account.bankName,
+
+      bankCode:
+        bankCode ||
+        account.bankCode,
+
+      currency:
+        currency ||
+        account.currency ||
+        "NGN",
+
+      metadata: {
+        ...(account.metadata || {}),
+
+        lastDvaAssignmentWebhook:
+          payload?.data ||
+          payload,
+
+        lastDvaAssignmentAt:
+          new Date(),
+      },
+    };
+
+    const updatedAccount =
+      await RepaymentAccountRepository
+        .updateDedicatedVirtualAccount(
+          account._id,
+          update,
+        );
+
+    if (!updatedAccount) {
+      throw createError(
+        "Unable to update repayment account with Paystack DVA",
+        409,
+      );
+    }
+
+    console.log(
+      "✅ PAYSTACK DVA ACTIVATED:",
+      {
+        accountId:
+          updatedAccount._id,
+
+        userId:
+          updatedAccount.user,
+
+        providerCustomerCode:
+          updatedAccount.providerCustomerCode,
+
+        providerAccountId:
+          updatedAccount.providerAccountId,
+
+        accountNumber:
+          updatedAccount.accountNumber,
+
+        accountName:
+          updatedAccount.accountName,
+
+        bankName:
+          updatedAccount.bankName,
+
+        bankCode:
+          updatedAccount.bankCode,
+
+        currency:
+          updatedAccount.currency,
+
+        dvaStatus:
+          updatedAccount.dvaStatus,
       },
     );
 
-  if (!updatedAccount) {
-    throw createError(
-      "Unable to update repayment account with Paystack DVA",
-      409,
-    );
-  }
+    return {
+      processed: true,
 
-  console.log("PAYSTACK DVA ACTIVATED:", {
-    accountId: updatedAccount._id,
+      type:
+        "dedicated_virtual_account_assignment",
 
-    userId: updatedAccount.user,
+      accountId:
+        updatedAccount._id,
 
-    providerCustomerCode: updatedAccount.providerCustomerCode,
+      userId:
+        updatedAccount.user,
 
-    providerAccountId: updatedAccount.providerAccountId,
+      dvaStatus:
+        updatedAccount.dvaStatus,
 
-    accountNumber: updatedAccount.accountNumber,
+      provider:
+        updatedAccount.provider,
 
-    bankName: updatedAccount.bankName,
+      providerCustomerCode:
+        updatedAccount.providerCustomerCode,
 
-    bankCode: updatedAccount.bankCode,
+      providerAccountId:
+        updatedAccount.providerAccountId,
 
-    currency: updatedAccount.currency,
-  });
+      accountNumber:
+        updatedAccount.accountNumber,
 
-  return {
-    processed: true,
+      accountName:
+        updatedAccount.accountName,
 
-    type: "dedicated_virtual_account_assignment",
+      bankName:
+        updatedAccount.bankName,
 
-    accountId: updatedAccount._id,
+      bankCode:
+        updatedAccount.bankCode,
 
-    userId: updatedAccount.user,
-
-    dvaStatus: updatedAccount.dvaStatus,
-
-    provider: updatedAccount.provider,
-
-    providerCustomerCode: updatedAccount.providerCustomerCode,
-
-    providerAccountId: updatedAccount.providerAccountId,
-
-    accountNumber: updatedAccount.accountNumber,
-
-    accountName: updatedAccount.accountName,
-
-    bankName: updatedAccount.bankName,
-
-    bankCode: updatedAccount.bankCode,
-
-    currency: updatedAccount.currency,
+      currency:
+        updatedAccount.currency,
+    };
   };
-};
 
 // =========================================================
-// DEDICATED ACCOUNT ASSIGN FAILED
+// DVA ASSIGN FAILED
 // =========================================================
 
-const handleDedicatedAccountAssignFailed = async (payload) => {
-  const customerCode = getDvaCustomerCode(payload);
+const handleDedicatedAccountAssignFailed =
+  async (payload) => {
+    const customerCode =
+      getDvaCustomerCode(payload);
 
-  const providerAccountId = getDvaProviderAccountId(payload);
-
-  const accountNumber = getDvaAccountNumber(payload);
-
-  const failureReason = getFailureReason(
-    payload,
-    "Paystack failed to assign dedicated virtual account",
-  );
-
-  // -----------------------------------------------------
-  // FIND LOCAL REPAYMENT ACCOUNT
-  // -----------------------------------------------------
-
-  let account = null;
-
-  // 1. Paystack customer code
-  if (customerCode) {
-    account =
-      await RepaymentAccountRepository.findByProviderCustomerCode(customerCode);
-  }
-
-  // 2. Paystack DVA account ID
-  if (!account && providerAccountId) {
-    account =
-      await RepaymentAccountRepository.findByProviderAccountId(
-        providerAccountId,
+    const providerAccountId =
+      getDvaProviderAccountId(
+        payload,
       );
-  }
 
-  // 3. DVA account number
-  if (!account && accountNumber) {
-    account =
-      await RepaymentAccountRepository.findByAccountNumber(accountNumber);
-  }
+    const accountNumber =
+      getDvaAccountNumber(payload);
 
-  if (!account) {
-    throw createError(
-      `Repayment account not found for failed Paystack DVA assignment. Customer: ${
-        customerCode || "unknown"
-      }`,
-      404,
-    );
-  }
+    const failureReason =
+      getFailureReason(
+        payload,
+        "Paystack failed to assign dedicated virtual account",
+      );
 
-  // -----------------------------------------------------
-  // PROVIDER VALIDATION
-  // -----------------------------------------------------
+    let account = null;
 
-  if (account.provider && account.provider !== "paystack") {
-    throw createError(
-      `Repayment account belongs to provider ${account.provider}`,
-      400,
-    );
-  }
+    if (customerCode) {
+      account =
+        await RepaymentAccountRepository
+          .findByProviderCustomerCode(
+            customerCode,
+          );
+    }
 
-  // -----------------------------------------------------
-  // MARK DVA FAILED
-  // -----------------------------------------------------
+    if (
+      !account &&
+      providerAccountId
+    ) {
+      account =
+        await RepaymentAccountRepository
+          .findByProviderAccountId(
+            providerAccountId,
+          );
+    }
 
-  const updatedAccount =
-    await RepaymentAccountRepository.updateDedicatedVirtualAccount(
-      account._id,
-      {
-        provider: "paystack",
+    if (
+      !account &&
+      accountNumber
+    ) {
+      account =
+        await RepaymentAccountRepository
+          .findByAccountNumber(
+            accountNumber,
+          );
+    }
 
-        dvaStatus: "failed",
+    if (!account) {
+      throw createError(
+        `Repayment account not found for failed Paystack DVA assignment. Customer: ${
+          customerCode ||
+          "unknown"
+        }`,
+        404,
+      );
+    }
 
-        providerCustomerCode: customerCode || account.providerCustomerCode,
+    if (
+      account.provider &&
+      account.provider !==
+        "paystack"
+    ) {
+      throw createError(
+        `Repayment account belongs to provider ${account.provider}`,
+        400,
+      );
+    }
 
-        providerAccountId: providerAccountId || account.providerAccountId,
+    // -----------------------------------------------------
+    // NEVER DOWNGRADE AN ACTIVE DVA
+    // -----------------------------------------------------
 
-        accountNumber: accountNumber || account.accountNumber,
+    if (
+      account.dvaStatus ===
+        "active" &&
+      account.accountNumber
+    ) {
+      console.warn(
+        "⚠️ PAYSTACK DVA FAILURE RECEIVED FOR ACTIVE ACCOUNT",
+        {
+          accountId:
+            account._id,
 
-        metadata: {
-          ...(account.metadata || {}),
+          reason:
+            failureReason,
+        },
+      );
 
-          lastDvaAssignmentFailure: {
-            reason: failureReason,
+      return {
+        processed: true,
 
-            receivedAt: new Date(),
+        ignored: true,
 
-            payload: payload?.data || payload,
+        reason:
+          "Account already has an active DVA",
+
+        accountId:
+          account._id,
+
+        dvaStatus:
+          account.dvaStatus,
+      };
+    }
+
+    // -----------------------------------------------------
+    // MARK FAILED
+    // -----------------------------------------------------
+
+    const updatedAccount =
+      await RepaymentAccountRepository
+        .updateDedicatedVirtualAccount(
+          account._id,
+          {
+            provider:
+              "paystack",
+
+            dvaStatus:
+              "failed",
+
+            providerCustomerCode:
+              customerCode ||
+              account.providerCustomerCode,
+
+            providerAccountId:
+              providerAccountId ||
+              account.providerAccountId,
+
+            accountNumber:
+              accountNumber ||
+              account.accountNumber,
+
+            metadata: {
+              ...(account.metadata ||
+                {}),
+
+              lastDvaAssignmentFailure: {
+                reason:
+                  failureReason,
+
+                receivedAt:
+                  new Date(),
+
+                payload:
+                  payload?.data ||
+                  payload,
+              },
+            },
           },
-        },
+        );
+
+    if (!updatedAccount) {
+      throw createError(
+        "Unable to update repayment account DVA failure status",
+        409,
+      );
+    }
+
+    console.error(
+      "❌ PAYSTACK DVA ASSIGNMENT FAILED:",
+      {
+        accountId:
+          updatedAccount._id,
+
+        userId:
+          updatedAccount.user,
+
+        providerCustomerCode:
+          updatedAccount.providerCustomerCode,
+
+        providerAccountId:
+          updatedAccount.providerAccountId,
+
+        reason:
+          failureReason,
       },
     );
 
-  if (!updatedAccount) {
-    throw createError(
-      "Unable to update repayment account DVA failure status",
-      409,
-    );
-  }
+    return {
+      processed: true,
 
-  console.error("PAYSTACK DVA ASSIGNMENT FAILED:", {
-    accountId: updatedAccount._id,
+      type:
+        "dedicated_virtual_account_assignment",
 
-    userId: updatedAccount.user,
+      status:
+        "failed",
 
-    providerCustomerCode: updatedAccount.providerCustomerCode,
+      accountId:
+        updatedAccount._id,
 
-    providerAccountId: updatedAccount.providerAccountId,
+      userId:
+        updatedAccount.user,
 
-    accountNumber: updatedAccount.accountNumber,
+      dvaStatus:
+        updatedAccount.dvaStatus,
 
-    reason: failureReason,
-  });
+      provider:
+        updatedAccount.provider,
 
-  return {
-    processed: true,
+      providerCustomerCode:
+        updatedAccount.providerCustomerCode,
 
-    type: "dedicated_virtual_account_assignment",
+      providerAccountId:
+        updatedAccount.providerAccountId,
 
-    status: "failed",
+      accountNumber:
+        updatedAccount.accountNumber,
 
-    accountId: updatedAccount._id,
-
-    userId: updatedAccount.user,
-
-    dvaStatus: updatedAccount.dvaStatus,
-
-    provider: updatedAccount.provider,
-
-    providerCustomerCode: updatedAccount.providerCustomerCode,
-
-    providerAccountId: updatedAccount.providerAccountId,
-
-    accountNumber: updatedAccount.accountNumber,
-
-    reason: failureReason,
+      reason:
+        failureReason,
+    };
   };
-};
 
 // =========================================================
 // MANDATE AUTHORIZED
 // =========================================================
 
-const handleMandateAuthorized = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateAuthorized =
+  async (
+    payload,
+    eventType,
+  ) => {
+    const mandate =
+      await findMandateFromPayload(
+        payload,
+        eventType,
+      );
 
-  if (mandate.status === "cancelled" || mandate.status === "expired") {
+    if (
+      mandate.status ===
+        "cancelled" ||
+      mandate.status ===
+        "expired"
+    ) {
+      return {
+        ignored: true,
+
+        reason:
+          "Mandate is no longer active",
+
+        mandateId:
+          mandate._id,
+      };
+    }
+
+    if (
+      mandate.status ===
+      "active"
+    ) {
+      await MandateRepository
+        .updateById(
+          mandate._id,
+          mandate.user,
+          buildMandateProviderUpdate(
+            payload,
+          ),
+        );
+
+      return {
+        alreadyActive: true,
+
+        mandateId:
+          mandate._id,
+      };
+    }
+
+    await MandateRepository
+      .updateById(
+        mandate._id,
+        mandate.user,
+        {
+          status:
+            "authorized",
+
+          authorizedAt:
+            mandate.authorizedAt ||
+            new Date(),
+
+          ...buildMandateProviderUpdate(
+            payload,
+          ),
+        },
+      );
+
     return {
-      ignored: true,
-      reason: "Mandate is no longer active",
-      mandateId: mandate._id,
+      processed: true,
+
+      mandateId:
+        mandate._id,
+
+      status:
+        "authorized",
     };
-  }
-
-  if (mandate.status === "active") {
-    await MandateRepository.updateById(
-      mandate._id,
-      mandate.user,
-      buildMandateProviderUpdate(payload),
-    );
-
-    return {
-      alreadyActive: true,
-      mandateId: mandate._id,
-    };
-  }
-
-  await MandateRepository.updateById(mandate._id, mandate.user, {
-    status: "authorized",
-
-    authorizedAt: mandate.authorizedAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate authorized: ${mandate._id}`);
-
-  return {
-    processed: true,
-    mandateId: mandate._id,
-    status: "authorized",
   };
-};
 
 // =========================================================
 // MANDATE ACTIVE
 // =========================================================
 
-const handleMandateActive = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateActive =
+  async (
+    payload,
+    eventType,
+  ) => {
+    const mandate =
+      await findMandateFromPayload(
+        payload,
+        eventType,
+      );
 
-  if (mandate.status === "cancelled" || mandate.status === "expired") {
+    if (
+      mandate.status ===
+        "cancelled" ||
+      mandate.status ===
+        "expired"
+    ) {
+      return {
+        ignored: true,
+
+        reason:
+          "Mandate is no longer active",
+
+        mandateId:
+          mandate._id,
+      };
+    }
+
+    await MandateRepository
+      .updateById(
+        mandate._id,
+        mandate.user,
+        {
+          status:
+            "active",
+
+          authorizedAt:
+            mandate.authorizedAt ||
+            new Date(),
+
+          activatedAt:
+            mandate.activatedAt ||
+            new Date(),
+
+          ...buildMandateProviderUpdate(
+            payload,
+          ),
+        },
+      );
+
     return {
-      ignored: true,
-      reason: "Mandate is no longer active",
-      mandateId: mandate._id,
+      processed: true,
+
+      mandateId:
+        mandate._id,
+
+      status:
+        "active",
     };
-  }
-
-  await MandateRepository.updateById(mandate._id, mandate.user, {
-    status: "active",
-
-    authorizedAt: mandate.authorizedAt || new Date(),
-
-    activatedAt: mandate.activatedAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate active: ${mandate._id}`);
-
-  return {
-    processed: true,
-    mandateId: mandate._id,
-    status: "active",
   };
-};
 
 // =========================================================
 // MANDATE FAILED
 // =========================================================
 
-const handleMandateFailed = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateFailed =
+  async (
+    payload,
+    eventType,
+  ) => {
+    const mandate =
+      await findMandateFromPayload(
+        payload,
+        eventType,
+      );
 
-  if (
-    mandate.status === "cancelled" ||
-    mandate.status === "expired" ||
-    mandate.status === "active"
-  ) {
+    if (
+      mandate.status ===
+        "cancelled" ||
+      mandate.status ===
+        "expired" ||
+      mandate.status ===
+        "active"
+    ) {
+      return {
+        ignored: true,
+
+        mandateId:
+          mandate._id,
+
+        status:
+          mandate.status,
+      };
+    }
+
+    await MandateRepository
+      .updateById(
+        mandate._id,
+        mandate.user,
+        {
+          status:
+            "failed",
+
+          failureReason:
+            getFailureReason(
+              payload,
+              "Provider reported mandate failure",
+            ),
+
+          failedAt:
+            mandate.failedAt ||
+            new Date(),
+
+          ...buildMandateProviderUpdate(
+            payload,
+          ),
+        },
+      );
+
     return {
-      ignored: true,
-      mandateId: mandate._id,
-      status: mandate.status,
+      processed: true,
+
+      mandateId:
+        mandate._id,
+
+      status:
+        "failed",
     };
-  }
-
-  await MandateRepository.updateById(mandate._id, mandate.user, {
-    status: "failed",
-
-    failureReason: getFailureReason(
-      payload,
-      "Provider reported mandate failure",
-    ),
-
-    failedAt: mandate.failedAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate failed: ${mandate._id}`);
-
-  return {
-    processed: true,
-    mandateId: mandate._id,
-    status: "failed",
   };
-};
 
 // =========================================================
 // MANDATE CANCELLED
 // =========================================================
 
-const handleMandateCancelled = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateCancelled =
+  async (
+    payload,
+    eventType,
+  ) => {
+    const mandate =
+      await findMandateFromPayload(
+        payload,
+        eventType,
+      );
 
-  if (mandate.status === "cancelled") {
+    if (
+      mandate.status ===
+      "cancelled"
+    ) {
+      return {
+        alreadyCancelled: true,
+
+        mandateId:
+          mandate._id,
+      };
+    }
+
+    await MandateRepository
+      .updateById(
+        mandate._id,
+        mandate.user,
+        {
+          status:
+            "cancelled",
+
+          cancelledAt:
+            mandate.cancelledAt ||
+            new Date(),
+
+          ...buildMandateProviderUpdate(
+            payload,
+          ),
+        },
+      );
+
     return {
-      alreadyCancelled: true,
-      mandateId: mandate._id,
+      processed: true,
+
+      mandateId:
+        mandate._id,
+
+      status:
+        "cancelled",
     };
-  }
-
-  await MandateRepository.updateById(mandate._id, mandate.user, {
-    status: "cancelled",
-
-    cancelledAt: mandate.cancelledAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate cancelled: ${mandate._id}`);
-
-  return {
-    processed: true,
-    mandateId: mandate._id,
-    status: "cancelled",
   };
-};
 
 // =========================================================
 // MANDATE EXPIRED
 // =========================================================
 
-const handleMandateExpired = async (payload, eventType) => {
-  const mandate = await findMandateFromPayload(payload, eventType);
+const handleMandateExpired =
+  async (
+    payload,
+    eventType,
+  ) => {
+    const mandate =
+      await findMandateFromPayload(
+        payload,
+        eventType,
+      );
 
-  if (mandate.status === "cancelled" || mandate.status === "expired") {
+    if (
+      mandate.status ===
+        "cancelled" ||
+      mandate.status ===
+        "expired"
+    ) {
+      return {
+        alreadyExpired: true,
+
+        mandateId:
+          mandate._id,
+      };
+    }
+
+    await MandateRepository
+      .updateById(
+        mandate._id,
+        mandate.user,
+        {
+          status:
+            "expired",
+
+          expiredAt:
+            mandate.expiredAt ||
+            new Date(),
+
+          ...buildMandateProviderUpdate(
+            payload,
+          ),
+        },
+      );
+
     return {
-      alreadyExpired: true,
-      mandateId: mandate._id,
+      processed: true,
+
+      mandateId:
+        mandate._id,
+
+      status:
+        "expired",
     };
-  }
-
-  await MandateRepository.updateById(mandate._id, mandate.user, {
-    status: "expired",
-
-    expiredAt: mandate.expiredAt || new Date(),
-
-    ...buildMandateProviderUpdate(payload),
-  });
-
-  console.log(`Mandate expired: ${mandate._id}`);
-
-  return {
-    processed: true,
-    mandateId: mandate._id,
-    status: "expired",
   };
-};
 
 // =========================================================
 // CHARGE SUCCESS
 // =========================================================
 
-const handleChargeSuccess = async (payload) => {
-  const metadata = payload?.data?.metadata || payload?.metadata || {};
+const handleChargeSuccess =
+  async (payload) => {
+    const metadata =
+      payload?.data?.metadata ||
+      payload?.metadata ||
+      {};
 
-  const providerReference =
-    payload?.data?.reference || payload?.reference || null;
+    const providerReference =
+      payload?.data?.reference ||
+      payload?.reference ||
+      null;
 
-  // =======================================================
-  // DEDICATED VIRTUAL ACCOUNT TRANSFER
-  // =======================================================
+    // =====================================================
+    // DVA TRANSFER
+    // =====================================================
 
-  if (isDedicatedVirtualAccountCharge(payload)) {
-    const accountNumber = getDvaReceivingAccountNumber(payload);
+    if (
+      isDedicatedVirtualAccountCharge(
+        payload,
+      )
+    ) {
+      const accountNumber =
+        getDvaReceivingAccountNumber(
+          payload,
+        );
 
-    const rawAmount = payload?.data?.amount ?? payload?.amount ?? null;
+      const rawAmount =
+        payload?.data?.amount ??
+        payload?.amount ??
+        null;
 
-    if (!accountNumber) {
-      throw createError("Unable to identify receiving DVA account number", 400);
+      if (!accountNumber) {
+        throw createError(
+          "Unable to identify receiving DVA account number",
+          400,
+        );
+      }
+
+      if (
+        rawAmount === null ||
+        rawAmount === undefined
+      ) {
+        throw createError(
+          "Unable to identify DVA transfer amount",
+          400,
+        );
+      }
+
+      const numericAmount =
+        Number(rawAmount);
+
+      if (
+        !Number.isFinite(
+          numericAmount,
+        ) ||
+        numericAmount <= 0
+      ) {
+        throw createError(
+          "Invalid DVA transfer amount",
+          400,
+        );
+      }
+
+      if (!providerReference) {
+        throw createError(
+          "Missing DVA transfer reference",
+          400,
+        );
+      }
+
+      const amountInNaira =
+        numericAmount / 100;
+
+      const result =
+        await RepaymentAccountService
+          .creditDedicatedVirtualAccount({
+            accountNumber,
+
+            amount:
+              amountInNaira,
+
+            providerReference,
+
+            providerData:
+              payload?.data ||
+              payload,
+          });
+
+      return {
+        processed: true,
+
+        type:
+          "repayment_account_dva_funding",
+
+        reference:
+          providerReference,
+
+        accountNumber,
+
+        amount:
+          amountInNaira,
+
+        result,
+      };
     }
 
-    if (rawAmount === null || rawAmount === undefined) {
-      throw createError("Unable to identify DVA transfer amount", 400);
+    // =====================================================
+    // REPAYMENT ACCOUNT CHECKOUT FUNDING
+    // =====================================================
+
+    if (
+      metadata.transactionType ===
+      "repayment_account_funding"
+    ) {
+      const amount =
+        payload?.data?.amount ||
+        payload?.amount ||
+        null;
+
+      if (!amount) {
+        throw createError(
+          "Repayment account funding amount is missing",
+        );
+      }
+
+      if (!providerReference) {
+        throw createError(
+          "Repayment account funding reference is missing",
+        );
+      }
+
+      return RepaymentAccountService
+        .completeFunding({
+          providerReference,
+
+          amount:
+            Number(amount) / 100,
+
+          providerData:
+            payload?.data ||
+            payload,
+        });
     }
 
-    const numericAmount = Number(rawAmount);
+    // =====================================================
+    // NORMAL CUSTOMER REPAYMENT
+    // =====================================================
 
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      throw createError("Invalid DVA transfer amount", 400);
+    const repaymentReference =
+      getRepaymentReference(
+        payload,
+      );
+
+    if (!repaymentReference) {
+      return {
+        ignored: true,
+
+        reason:
+          "Missing repayment reference",
+      };
     }
 
-    if (!providerReference) {
-      throw createError("Missing DVA transfer reference", 400);
+    const repayment =
+      await RepaymentRepository
+        .findByPaymentReference(
+          repaymentReference,
+        );
+
+    if (!repayment) {
+      return {
+        ignored: true,
+
+        reason:
+          "Repayment not found",
+
+        reference:
+          repaymentReference,
+      };
     }
 
-    const amountInNaira = numericAmount / 100;
+    if (
+      repayment.status ===
+        "successful" ||
+      repayment.status ===
+        "reversed"
+    ) {
+      return {
+        alreadyFinalized: true,
 
-    console.log("PROCESSING DVA TRANSFER:", {
-      reference: providerReference,
+        repaymentId:
+          repayment._id,
 
-      accountNumber,
+        status:
+          repayment.status,
+      };
+    }
 
-      amount: amountInNaira,
-    });
+    const updated =
+      await RepaymentRepository
+        .updateById(
+          repayment._id,
+          {
+            status:
+              "successful",
 
-    const result = await RepaymentAccountService.creditDedicatedVirtualAccount({
-      accountNumber,
+            provider:
+              "paystack",
 
-      amount: amountInNaira,
+            providerReference:
+              payload?.data?.id ||
+              payload?.data
+                ?.transaction_id ||
+              repayment.providerReference ||
+              repaymentReference,
 
-      providerReference,
-
-      providerData: payload?.data || payload,
-    });
-
-    console.log("DVA ACCOUNT CREDITED:", {
-      reference: providerReference,
-
-      accountNumber,
-
-      amount: amountInNaira,
-    });
+            providerData:
+              payload,
+          },
+        );
 
     return {
       processed: true,
 
-      type: "repayment_account_dva_funding",
+      repaymentId:
+        repayment._id,
 
-      reference: providerReference,
+      status:
+        "successful",
 
-      accountNumber,
-
-      amount: amountInNaira,
-
-      result,
+      repayment:
+        updated,
     };
-  }
-
-  // =======================================================
-  // REPAYMENT ACCOUNT CHECKOUT FUNDING
-  // =======================================================
-
-  if (metadata.transactionType === "repayment_account_funding") {
-    const amount = payload?.data?.amount || payload?.amount || null;
-
-    if (!amount) {
-      throw createError("Repayment account funding amount is missing");
-    }
-
-    if (!providerReference) {
-      throw createError("Repayment account funding reference is missing");
-    }
-
-    return RepaymentAccountService.completeFunding({
-      providerReference,
-
-      amount: Number(amount) / 100,
-
-      providerData: payload?.data || payload,
-    });
-  }
-
-  // =======================================================
-  // NORMAL CUSTOMER REPAYMENT
-  // =======================================================
-
-  const repaymentReference = getRepaymentReference(payload);
-
-  if (!repaymentReference) {
-    return {
-      ignored: true,
-      reason: "Missing repayment reference",
-    };
-  }
-
-  const repayment =
-    await RepaymentRepository.findByPaymentReference(repaymentReference);
-
-  if (!repayment) {
-    return {
-      ignored: true,
-      reason: "Repayment not found",
-      reference: repaymentReference,
-    };
-  }
-
-  if (repayment.status === "successful" || repayment.status === "reversed") {
-    return {
-      alreadyFinalized: true,
-
-      repaymentId: repayment._id,
-
-      status: repayment.status,
-    };
-  }
-
-  const updated = await RepaymentRepository.updateById(repayment._id, {
-    status: "successful",
-
-    provider: "paystack",
-
-    providerReference:
-      payload?.data?.id ||
-      payload?.data?.transaction_id ||
-      repayment.providerReference ||
-      repaymentReference,
-
-    providerData: payload,
-  });
-
-  return {
-    processed: true,
-
-    repaymentId: repayment._id,
-
-    status: "successful",
-
-    repayment: updated,
   };
-};
 
 // =========================================================
 // CHARGE FAILED
 // =========================================================
 
-const handleChargeFailed = async (payload) => {
-  const metadata = payload?.data?.metadata || payload?.metadata || {};
+const handleChargeFailed =
+  async (payload) => {
+    const metadata =
+      payload?.data?.metadata ||
+      payload?.metadata ||
+      {};
 
-  if (metadata.transactionType === "repayment_account_funding") {
-    const providerReference =
-      payload?.data?.reference || payload?.reference || null;
+    if (
+      metadata.transactionType ===
+      "repayment_account_funding"
+    ) {
+      const providerReference =
+        payload?.data?.reference ||
+        payload?.reference ||
+        null;
 
-    console.warn(`REPAYMENT ACCOUNT FUNDING FAILED: ${providerReference}`);
+      return {
+        processed: true,
+
+        type:
+          "repayment_account_funding",
+
+        status:
+          "failed",
+
+        reference:
+          providerReference,
+
+        reason:
+          getFailureReason(
+            payload,
+            "Repayment account funding failed",
+          ),
+      };
+    }
+
+    const repaymentReference =
+      getRepaymentReference(
+        payload,
+      );
+
+    if (!repaymentReference) {
+      return {
+        ignored: true,
+
+        reason:
+          "Missing repayment reference",
+      };
+    }
+
+    const repayment =
+      await RepaymentRepository
+        .findByPaymentReference(
+          repaymentReference,
+        );
+
+    if (!repayment) {
+      return {
+        ignored: true,
+
+        reason:
+          "Repayment not found",
+
+        reference:
+          repaymentReference,
+      };
+    }
+
+    if (
+      repayment.status ===
+        "successful" ||
+      repayment.status ===
+        "reversed"
+    ) {
+      return {
+        alreadyFinalized: true,
+
+        repaymentId:
+          repayment._id,
+
+        status:
+          repayment.status,
+      };
+    }
+
+    const failureReason =
+      getFailureReason(
+        payload,
+        "Paystack charge failed",
+      );
+
+    const updated =
+      await RepaymentRepository
+        .updateById(
+          repayment._id,
+          {
+            status:
+              "failed",
+
+            failureReason,
+
+            provider:
+              "paystack",
+
+            providerReference:
+              payload?.data?.id ||
+              payload?.data
+                ?.transaction_id ||
+              repayment.providerReference ||
+              repaymentReference,
+
+            providerData:
+              payload,
+          },
+        );
 
     return {
       processed: true,
 
-      type: "repayment_account_funding",
+      repaymentId:
+        repayment._id,
 
-      status: "failed",
+      status:
+        "failed",
 
-      reference: providerReference,
+      failureReason,
 
-      reason: getFailureReason(payload, "Repayment account funding failed"),
+      repayment:
+        updated,
     };
-  }
-
-  const repaymentReference = getRepaymentReference(payload);
-
-  if (!repaymentReference) {
-    return {
-      ignored: true,
-      reason: "Missing repayment reference",
-    };
-  }
-
-  const repayment =
-    await RepaymentRepository.findByPaymentReference(repaymentReference);
-
-  if (!repayment) {
-    return {
-      ignored: true,
-
-      reason: "Repayment not found",
-
-      reference: repaymentReference,
-    };
-  }
-
-  if (repayment.status === "successful" || repayment.status === "reversed") {
-    return {
-      alreadyFinalized: true,
-
-      repaymentId: repayment._id,
-
-      status: repayment.status,
-    };
-  }
-
-  const failureReason = getFailureReason(payload, "Paystack charge failed");
-
-  const updated = await RepaymentRepository.updateById(repayment._id, {
-    status: "failed",
-
-    failureReason,
-
-    provider: "paystack",
-
-    providerReference:
-      payload?.data?.id ||
-      payload?.data?.transaction_id ||
-      repayment.providerReference ||
-      repaymentReference,
-
-    providerData: payload,
-  });
-
-  return {
-    processed: true,
-
-    repaymentId: repayment._id,
-
-    status: "failed",
-
-    failureReason,
-
-    repayment: updated,
   };
-};
 
 // =========================================================
 // DISBURSEMENT SUCCESS
 // =========================================================
 
-const handleDisbursementSuccess = async (payload) => {
-  const providerReference = getDisbursementReference(payload);
+const handleDisbursementSuccess =
+  async (payload) => {
+    const providerReference =
+      getDisbursementReference(
+        payload,
+      );
 
-  if (!providerReference) {
-    throw createError("Missing disbursement reference");
-  }
+    if (!providerReference) {
+      throw createError(
+        "Missing disbursement reference",
+      );
+    }
 
-  const providerResult = buildDisbursementProviderResult(payload);
+    const providerResult =
+      buildDisbursementProviderResult(
+        payload,
+      );
 
-  console.log(`Processing disbursement success: ${providerReference}`);
-
-  return AdminDisbursementService.markDisbursementSuccessful(
-    providerReference,
-    providerResult,
-  );
-};
+    return AdminDisbursementService
+      .markDisbursementSuccessful(
+        providerReference,
+        providerResult,
+      );
+  };
 
 // =========================================================
 // DISBURSEMENT FAILED
 // =========================================================
 
-const handleDisbursementFailed = async (payload) => {
-  const providerReference = getDisbursementReference(payload);
+const handleDisbursementFailed =
+  async (payload) => {
+    const providerReference =
+      getDisbursementReference(
+        payload,
+      );
 
-  if (!providerReference) {
-    throw createError("Missing disbursement reference");
-  }
+    if (!providerReference) {
+      throw createError(
+        "Missing disbursement reference",
+      );
+    }
 
-  const providerResult = buildDisbursementProviderResult(payload);
+    const providerResult = {
+      ...buildDisbursementProviderResult(
+        payload,
+      ),
 
-  console.log(`Processing disbursement failure: ${providerReference}`);
+      failureReason:
+        getFailureReason(
+          payload,
+          "Paystack transfer failed",
+        ),
+    };
 
-  return AdminDisbursementService.markDisbursementFailed(
-    providerReference,
-    providerResult,
-  );
-};
+    return AdminDisbursementService
+      .markDisbursementFailed(
+        providerReference,
+        providerResult,
+      );
+  };
 
 // =========================================================
 // DISBURSEMENT REVERSED
 // =========================================================
 
-const handleDisbursementReversed = async (payload) => {
-  const providerReference = getDisbursementReference(payload);
+const handleDisbursementReversed =
+  async (payload) => {
+    const providerReference =
+      getDisbursementReference(
+        payload,
+      );
 
-  if (!providerReference) {
-    throw createError("Missing disbursement reference");
-  }
+    if (!providerReference) {
+      throw createError(
+        "Missing disbursement reference",
+      );
+    }
 
-  const providerResult = buildDisbursementProviderResult(payload);
+    const providerResult = {
+      ...buildDisbursementProviderResult(
+        payload,
+      ),
 
-  console.log(`Processing disbursement reversal: ${providerReference}`);
+      failureReason:
+        getFailureReason(
+          payload,
+          "Paystack transfer was reversed",
+        ),
+    };
 
-  return AdminDisbursementService.markDisbursementReversed(
-    providerReference,
-    providerResult,
-  );
-};
+    return AdminDisbursementService
+      .markDisbursementReversed(
+        providerReference,
+        providerResult,
+      );
+  };
 
 // =========================================================
 // EXPORT
@@ -1759,5 +2929,5 @@ const handleDisbursementReversed = async (payload) => {
 
 module.exports = {
   processWebhook,
-  getDvaReceivingAccountNumber,
 };
+
