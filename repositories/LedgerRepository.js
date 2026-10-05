@@ -65,12 +65,39 @@ const findByLoan = async (
 // FIND ALL LEDGER - ADMIN
 // =========================================================
 
-const findAll = async (limit = 500) => {
-  return Ledger.find({})
-    .sort({
-      createdAt: -1,
-    })
-    .limit(limit);
+const findAll = async (options = {}) => {
+  const legacyLimit = typeof options === "number";
+  const requestedPage = legacyLimit ? 1 : options.page;
+  const requestedLimit = legacyLimit ? options : options.limit;
+  const safePage = Math.max(1, Number(requestedPage) || 1);
+  const maximumLimit = legacyLimit ? 500 : 100;
+  const defaultLimit = legacyLimit ? 500 : 50;
+  const safeLimit = Math.min(
+    maximumLimit,
+    Math.max(1, Number(requestedLimit) || defaultLimit),
+  );
+  const skip = (safePage - 1) * safeLimit;
+
+  const [entries, total] = await Promise.all([
+    Ledger.find({})
+      .populate("user", "name email phone")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit),
+    Ledger.countDocuments({}),
+  ]);
+
+  if (legacyLimit) {
+    return entries;
+  }
+
+  return {
+    entries,
+    total,
+    page: safePage,
+    limit: safeLimit,
+    pages: Math.ceil(total / safeLimit),
+  };
 };
 
 module.exports = {

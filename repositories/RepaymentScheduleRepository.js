@@ -130,24 +130,7 @@ const findByUser = async (
     user: userId,
   })
     .populate(
-      "loan",
-      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency numberOfInstallments installmentAmount startDate maturityDate"
-    )
-    .populate(
-      "loanApplication",
-      "applicationNumber amountRequested status"
-    )
-    .populate(
-      "loanOffer",
-      "approvedAmount interestRate interestType totalRepayment status"
-    )
-    .populate(
-      "disbursement",
-      "amount currency method provider reference status completedAt"
-    )
-    .sort({
-      createdAt: -1,
-    });
+      }).sort({
 };
 
 // =========================================================

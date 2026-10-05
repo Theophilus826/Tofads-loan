@@ -10,8 +10,10 @@ const AdminDisbursementService = require("./AdminDisbursementService");
 const {
   verifyWebhookSignature,
 } = require("../config/PaymentProvider");
+const RepaymentSettlementService =
+  require("../services/RepaymentSettlementService");
 
-// =========================================================
+  // =========================================================
 // HELPERS
 // =========================================================
 
@@ -2567,19 +2569,39 @@ const handleChargeSuccess =
       "repayment_account_funding"
     ) {
       const amount =
-        payload?.data?.amount ||
-        payload?.amount ||
+        payload?.data?.amount ??
+        payload?.amount ??
         null;
 
-      if (!amount) {
+      if (
+        amount === null ||
+        amount === undefined
+      ) {
         throw createError(
           "Repayment account funding amount is missing",
+          400,
         );
       }
 
       if (!providerReference) {
         throw createError(
           "Repayment account funding reference is missing",
+          400,
+        );
+      }
+
+      const numericAmount =
+        Number(amount);
+
+      if (
+        !Number.isFinite(
+          numericAmount,
+        ) ||
+        numericAmount <= 0
+      ) {
+        throw createError(
+          "Invalid repayment account funding amount",
+          400,
         );
       }
 
@@ -2588,7 +2610,7 @@ const handleChargeSuccess =
           providerReference,
 
           amount:
-            Number(amount) / 100,
+            numericAmount / 100,
 
           providerData:
             payload?.data ||
@@ -2597,7 +2619,7 @@ const handleChargeSuccess =
     }
 
     // =====================================================
-    // NORMAL CUSTOMER REPAYMENT
+    // NORMAL CUSTOMER / MANDATE REPAYMENT
     // =====================================================
 
     const repaymentReference =
@@ -2614,9 +2636,16 @@ const handleChargeSuccess =
       };
     }
 
+    // -----------------------------------------------------
+    // Find repayment by either:
+    //
+    // 1. Internal paymentReference
+    // 2. Paystack providerReference
+    // -----------------------------------------------------
+
     const repayment =
       await RepaymentRepository
-        .findByPaymentReference(
+        .findByPaymentOrProviderReference(
           repaymentReference,
         );
 
@@ -2631,6 +2660,10 @@ const handleChargeSuccess =
           repaymentReference,
       };
     }
+
+    // -----------------------------------------------------
+    // Idempotency
+    // -----------------------------------------------------
 
     if (
       repayment.status ===
@@ -2649,40 +2682,155 @@ const handleChargeSuccess =
       };
     }
 
-    const updated =
-      await RepaymentRepository
-        .updateById(
-          repayment._id,
-          {
-            status:
-              "successful",
+    // -----------------------------------------------------
+    // Validate Paystack amount
+    //
+    // Paystack sends amount in KOBO.
+    // Your repayment.amount is stored in NAIRA.
+    // -----------------------------------------------------
 
-            provider:
-              "paystack",
+    const providerAmount =
+      Number(
+        payload?.data?.amount ??
+        payload?.amount ??
+        NaN,
+      );
 
-            providerReference:
-              payload?.data?.id ||
-              payload?.data
-                ?.transaction_id ||
-              repayment.providerReference ||
-              repaymentReference,
+    if (
+      !Number.isFinite(
+        providerAmount,
+      ) ||
+      providerAmount <= 0
+    ) {
+      throw createError(
+        "Invalid Paystack repayment amount",
+        400,
+      );
+    }
 
-            providerData:
-              payload,
-          },
-        );
+    const providerAmountInNaira =
+      providerAmount / 100;
+
+    const repaymentAmount =
+      Number(
+        repayment.amount,
+      );
+
+    if (
+      !Number.isFinite(
+        repaymentAmount,
+      ) ||
+      repaymentAmount <= 0
+    ) {
+      throw createError(
+        "Invalid repayment amount",
+        400,
+      );
+    }
+
+    // -----------------------------------------------------
+    // Amount integrity check
+    // -----------------------------------------------------
+
+    if (
+      Math.abs(
+        providerAmountInNaira -
+          repaymentAmount,
+      ) > 0.01
+    ) {
+      throw createError(
+        `Repayment amount mismatch. Expected ${repaymentAmount} NGN but Paystack returned ${providerAmountInNaira} NGN`,
+        400,
+      );
+    }
+
+    // -----------------------------------------------------
+    // Currency validation
+    // -----------------------------------------------------
+
+    const providerCurrency =
+      String(
+        payload?.data?.currency ||
+        payload?.currency ||
+        "NGN",
+      ).toUpperCase();
+
+    if (
+      providerCurrency !== "NGN"
+    ) {
+      throw createError(
+        `Unsupported repayment currency: ${providerCurrency}`,
+        400,
+      );
+    }
+
+    // -----------------------------------------------------
+    // Provider reference
+    //
+    // IMPORTANT:
+    //
+    // data.reference is the Paystack payment reference.
+    // data.id is the Paystack transaction ID.
+    //
+    // Keep providerReference as the reference.
+    // Store the complete payload in providerData so the
+    // transaction ID is still preserved.
+    // -----------------------------------------------------
+
+    const finalProviderReference =
+      payload?.data?.reference ||
+      payload?.reference ||
+      repayment.providerReference ||
+      repaymentReference;
+
+    // -----------------------------------------------------
+    // Settle repayment
+    // -----------------------------------------------------
+
+    const settlement =
+      await RepaymentSettlementService
+        .settleSuccessfulRepayment({
+          repaymentId:
+            repayment._id,
+
+          providerReference:
+            finalProviderReference,
+
+          providerData:
+            payload,
+        });
+
+    // -----------------------------------------------------
+    // Response
+    // -----------------------------------------------------
 
     return {
       processed: true,
 
+      type:
+        "loan_repayment",
+
       repaymentId:
         repayment._id,
+
+      paymentReference:
+        repayment.paymentReference,
+
+      providerReference:
+        finalProviderReference,
+
+      providerTransactionId:
+        payload?.data?.id ||
+        payload?.data?.transaction_id ||
+        null,
+
+      amount:
+        repaymentAmount,
 
       status:
         "successful",
 
-      repayment:
-        updated,
+      settlement,
     };
   };
 
@@ -2690,137 +2838,224 @@ const handleChargeSuccess =
 // CHARGE FAILED
 // =========================================================
 
-const handleChargeFailed =
-  async (payload) => {
-    const metadata =
-      payload?.data?.metadata ||
-      payload?.metadata ||
-      {};
+const handleChargeFailed = async (payload) => {
+  const metadata =
+    payload?.data?.metadata ||
+    payload?.metadata ||
+    {};
 
-    if (
-      metadata.transactionType ===
-      "repayment_account_funding"
-    ) {
-      const providerReference =
-        payload?.data?.reference ||
-        payload?.reference ||
-        null;
+  const providerReference =
+    payload?.data?.reference ||
+    payload?.reference ||
+    null;
 
-      return {
-        processed: true,
+  const providerTransactionId =
+    payload?.data?.id ||
+    payload?.data?.transaction_id ||
+    null;
 
-        type:
-          "repayment_account_funding",
+  const failureReason =
+    getFailureReason(payload) ||
+    "Paystack repayment charge failed";
 
-        status:
-          "failed",
+  // =====================================================
+  // REPAYMENT ACCOUNT CHECKOUT FUNDING
+  // =====================================================
 
-        reference:
-          providerReference,
-
-        reason:
-          getFailureReason(
-            payload,
-            "Repayment account funding failed",
-          ),
-      };
-    }
-
-    const repaymentReference =
-      getRepaymentReference(
-        payload,
-      );
-
-    if (!repaymentReference) {
-      return {
-        ignored: true,
-
-        reason:
-          "Missing repayment reference",
-      };
-    }
-
-    const repayment =
-      await RepaymentRepository
-        .findByPaymentReference(
-          repaymentReference,
-        );
-
-    if (!repayment) {
-      return {
-        ignored: true,
-
-        reason:
-          "Repayment not found",
-
-        reference:
-          repaymentReference,
-      };
-    }
-
-    if (
-      repayment.status ===
-        "successful" ||
-      repayment.status ===
-        "reversed"
-    ) {
-      return {
-        alreadyFinalized: true,
-
-        repaymentId:
-          repayment._id,
-
-        status:
-          repayment.status,
-      };
-    }
-
-    const failureReason =
-      getFailureReason(
-        payload,
-        "Paystack charge failed",
-      );
-
-    const updated =
-      await RepaymentRepository
-        .updateById(
-          repayment._id,
-          {
-            status:
-              "failed",
-
-            failureReason,
-
-            provider:
-              "paystack",
-
-            providerReference:
-              payload?.data?.id ||
-              payload?.data
-                ?.transaction_id ||
-              repayment.providerReference ||
-              repaymentReference,
-
-            providerData:
-              payload,
-          },
-        );
-
+  if (
+    metadata.transactionType ===
+    "repayment_account_funding"
+  ) {
     return {
       processed: true,
+
+      type:
+        "repayment_account_funding_failed",
+
+      reference:
+        providerReference,
+
+      providerTransactionId,
+
+      reason:
+        failureReason,
+    };
+  }
+
+  // =====================================================
+  // NORMAL CUSTOMER / MANDATE REPAYMENT
+  // =====================================================
+
+  const repaymentReference =
+    getRepaymentReference(payload);
+
+  if (!repaymentReference) {
+    return {
+      ignored: true,
+
+      reason:
+        "Missing repayment reference",
+    };
+  }
+
+  // =====================================================
+  // FIND REPAYMENT
+  //
+  // Search using either:
+  //
+  // 1. internal paymentReference
+  // 2. Paystack providerReference
+  //
+  // This keeps failed and successful webhook handling
+  // consistent.
+  // =====================================================
+
+  const repayment =
+    await RepaymentRepository
+      .findByPaymentOrProviderReference(
+        repaymentReference
+      );
+
+  if (!repayment) {
+    return {
+      ignored: true,
+
+      reason:
+        "Repayment not found",
+
+      reference:
+        repaymentReference,
+    };
+  }
+
+  // =====================================================
+  // IDEMPOTENCY
+  // =====================================================
+
+  if (
+    repayment.status ===
+    "successful"
+  ) {
+    return {
+      alreadyFinalized: true,
 
       repaymentId:
         repayment._id,
 
       status:
-        "failed",
+        repayment.status,
 
-      failureReason,
-
-      repayment:
-        updated,
+      message:
+        "Successful repayment cannot be changed to failed",
     };
+  }
+
+  if (
+    repayment.status ===
+    "reversed"
+  ) {
+    return {
+      alreadyFinalized: true,
+
+      repaymentId:
+        repayment._id,
+
+      status:
+        repayment.status,
+
+      message:
+        "Reversed repayment cannot be changed to failed",
+    };
+  }
+
+  if (
+    repayment.status ===
+    "failed"
+  ) {
+    return {
+      alreadyFailed: true,
+
+      repaymentId:
+        repayment._id,
+
+      status:
+        repayment.status,
+    };
+  }
+
+  // =====================================================
+  // UPDATE REPAYMENT
+  // =====================================================
+
+  const finalProviderReference =
+    providerReference ||
+    repayment.providerReference ||
+    repaymentReference;
+
+  const updated =
+    await RepaymentRepository
+      .updateById(
+        repayment._id,
+        {
+          status:
+            "failed",
+
+          provider:
+            "paystack",
+
+          providerReference:
+            finalProviderReference,
+
+          providerData:
+            payload,
+
+          failureReason:
+            failureReason,
+        }
+      );
+
+  // =====================================================
+  // IMPORTANT
+  // =====================================================
+  //
+  // DO NOT:
+  //
+  // - reduce loan.outstandingAmount
+  // - increase loan.amountPaid
+  // - update repayment schedule
+  // - allocate installment payment
+  //
+  // Because Paystack did not successfully collect
+  // the money.
+  //
+  // =====================================================
+
+  return {
+    processed: true,
+
+    type:
+      "loan_repayment_failed",
+
+    repaymentId:
+      repayment._id,
+
+    paymentReference:
+      repayment.paymentReference,
+
+    providerReference:
+      finalProviderReference,
+
+    providerTransactionId,
+
+    status:
+      "failed",
+
+    failureReason,
+
+    repayment:
+      updated,
   };
+};
 
 // =========================================================
 // DISBURSEMENT SUCCESS

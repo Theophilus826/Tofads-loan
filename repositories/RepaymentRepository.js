@@ -490,6 +490,47 @@ const updateStatusIfCurrent = async (
 };
 
 // =========================================================
+// WEBHOOK REPAYMENT LOOKUP
+// =========================================================
+//
+// Finds a repayment using either:
+// 1. Internal paymentReference
+// 2. Paystack providerReference
+//
+// Useful because Paystack webhook payloads can contain
+// different reference values depending on the transaction.
+//
+
+const findByPaymentOrProviderReference = async (
+  reference
+) => {
+  if (
+    !reference ||
+    !String(reference).trim()
+  ) {
+    return null;
+  }
+
+  const normalizedReference =
+    String(reference).trim();
+
+  return Repayment.findOne({
+    $or: [
+      {
+        paymentReference:
+          normalizedReference,
+      },
+      {
+        providerReference:
+          normalizedReference,
+      },
+    ],
+  });
+};
+
+
+
+// =========================================================
 // EXPORT
 // =========================================================
 
@@ -505,7 +546,7 @@ module.exports = {
   findByPaymentReference,
   findPendingByReference,
   findPendingByProviderReference,
-
+  findByPaymentOrProviderReference,
   findByLoan,
   findBySchedule,
   findByUser,

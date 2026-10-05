@@ -12,6 +12,7 @@ const cors = require("cors");
 
 const connectDB = require("./config/Db");
 const { errorHandler } = require("./middleware/ErrorMiddleware");
+const auditStaffMutations = require("./middleware/AuditMiddleware");
 
 const userRoutes = require("./routes/UserRoute");
 const adminUserRoutes = require("./routes/UserRoute");
@@ -49,6 +50,7 @@ const settingsRoutes = require("./routes/SettingsRoutes");
 const AdminDisbursementRoutes = require("./routes/AdminDisbursementRoutes");
 const autoDebitRoutes = require("./routes/AutoDebitRoutes");
 const OnboardingRoutes = require("./routes/onboarding");
+const AdminRepaymentControllerRoute = require("./routes/AdminRepaymentControllerRoute");
 
 // ==========================
 // CREATE EXPRESS APP
@@ -149,6 +151,7 @@ const startServer = async () => {
 
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
+    app.use(auditStaffMutations);
 
     // ==========================
     // HEALTH CHECK
@@ -183,12 +186,14 @@ const startServer = async () => {
     console.log(" POST /api/kyc/bvn/verify");
     console.log(" POST /api/kyc/face/verify");
     console.log("=================================");
+    
     // ==========================
     // ONBOARDING
     // ==========================
 
     app.use("/api/onboarding", OnboardingRoutes);
-
+    app.use("/api/admin/repayments", AdminRepaymentControllerRoute);
+    
     // ==========================
     // LOANS
     // ==========================

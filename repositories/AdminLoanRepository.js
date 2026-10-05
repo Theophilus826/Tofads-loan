@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const Loan = require("../model/Loan");
 const Disbursement = require("../model/DisbursementModel");
+const Mandate = require("../model/MandateModel");
 
 const loanUserPopulate = {
   path: "user",
@@ -98,9 +99,41 @@ const findLoanById = async (loanId) => {
     return null;
   }
 
-  return populateLoan(
+  const loan = await populateLoan(
     Loan.findById(loanId)
   );
+
+  if (!loan) {
+    return null;
+  }
+
+  const loanData = loan.toObject();
+  const userId = loan.user?._id || loan.user;
+  const loanOfferId = loan.loanOffer?._id || loan.loanOffer;
+
+  if (loanData.mandate) {
+    loanData.mandate = await Mandate.findById(
+      loanData.mandate,
+    )
+      .select(
+        "mandateReference provider status amountLimit frequency startDate endDate loanOffer user",
+      )
+      .lean();
+  }
+
+  if (!loanData.mandate && userId && loanOfferId) {
+    loanData.mandate = await Mandate.findOne({
+      user: userId,
+      loanOffer: loanOfferId,
+    })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .select(
+        "mandateReference provider status amountLimit frequency startDate endDate loanOffer user",
+      )
+      .lean();
+  }
+
+  return loanData;
 };
 
 /**

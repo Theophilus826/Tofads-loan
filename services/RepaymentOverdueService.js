@@ -1,5 +1,6 @@
 const RepaymentScheduleRepository =
   require("../repositories/RepaymentScheduleRepository");
+const Loan = require("../model/Loan");
 
 // =========================================================
 // ROUND MONEY
@@ -27,8 +28,30 @@ const processOverdueInstallments = async () => {
 
   let schedulesProcessed = 0;
   let installmentsMarkedOverdue = 0;
+  let invalidSchedulesSkipped = 0;
 
   for (const schedule of schedules) {
+    if (!schedule.loan && schedule.loanApplication) {
+      const matchingLoan = await Loan.findOne({
+        loanApplication: schedule.loanApplication,
+      })
+        .select("_id")
+        .lean();
+
+      if (matchingLoan) {
+        schedule.loan = matchingLoan._id;
+      }
+    }
+
+    if (!schedule.loan) {
+      invalidSchedulesSkipped++;
+      console.error(
+        "Skipping overdue schedule without a linked loan:",
+        String(schedule._id),
+      );
+      continue;
+    }
+
     let scheduleChanged = false;
 
     for (const installment of schedule.installments) {
@@ -144,11 +167,19 @@ const processOverdueInstallments = async () => {
         schedule.status = "active";
       }
 
-      await RepaymentScheduleRepository.save(
-        schedule
-      );
-
-      schedulesProcessed++;
+      try {
+        await RepaymentScheduleRepository.save(schedule);
+        schedulesProcessed++;
+      } catch (error) {
+        invalidSchedulesSkipped++;
+        console.error(
+          "Failed to save overdue schedule:",
+          {
+            scheduleId: String(schedule._id),
+            error: error.message,
+          },
+        );
+      }
     }
   }
 
@@ -158,6 +189,8 @@ const processOverdueInstallments = async () => {
     schedulesProcessed,
 
     installmentsMarkedOverdue,
+
+    invalidSchedulesSkipped,
   };
 };
 

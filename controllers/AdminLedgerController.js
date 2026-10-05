@@ -17,7 +17,7 @@ const getAllLedger = async (
       limit = 50,
     } = req.query;
 
-    const entries =
+    const result =
       await LedgerRepository.findAll({
         page,
         limit,
@@ -27,10 +27,12 @@ const getAllLedger = async (
       success: true,
       message:
         "Ledger entries retrieved successfully",
-      data: entries,
+      data: result.entries,
       pagination: {
-        page: Number(page),
-        limit: Number(limit),
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        pages: result.pages,
       },
     });
   } catch (error) {

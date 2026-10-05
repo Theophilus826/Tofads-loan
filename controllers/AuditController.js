@@ -14,12 +14,8 @@ const getAllAuditLogs = async (
     const logs =
       await AuditLog.find({})
         .populate(
-          "user",
+          "actor",
           "name email phone"
-        )
-        .populate(
-          "performedBy",
-          "name email phone role"
         )
         .sort({
           createdAt: -1,

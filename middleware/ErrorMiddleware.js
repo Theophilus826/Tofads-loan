@@ -1,5 +1,9 @@
 // middleware/ErrorMiddleware.js
 const errorHandler = (err, req, res, next) => {
+    if (res.headersSent) {
+        return next(err);
+    }
+
     const statusCode =
         err?.statusCode ||
         (res.statusCode && res.statusCode !== 200 ? res.statusCode : 500);
