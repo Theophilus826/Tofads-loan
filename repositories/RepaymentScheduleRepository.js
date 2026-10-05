@@ -130,7 +130,24 @@ const findByUser = async (
     user: userId,
   })
     .populate(
-      }).sort({
+      "loan",
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency numberOfInstallments installmentAmount startDate maturityDate"
+    )
+    .populate(
+      "loanApplication",
+      "applicationNumber amountRequested status"
+    )
+    .populate(
+      "loanOffer",
+      "approvedAmount interestRate interestType totalInterest totalFees totalRepayment durationDays repaymentFrequency installmentAmount numberOfInstallments status"
+    )
+    .populate(
+      "disbursement",
+      "amount currency method provider reference providerReference status completedAt"
+    )
+    .sort({
+      createdAt: -1,
+    });
 };
 
 // =========================================================
@@ -280,24 +297,7 @@ const findDueInstallments = async (
         },
       },
     },
-  })
-    .populate(
-      "loan",
-      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
-    )
-    .populate(
-      "loanApplication",
-      "applicationNumber amountRequested status"
-    )
-    .populate(
-      "loanOffer",
-      "approvedAmount interestRate interestType totalRepayment status"
-    )
-    .populate(
-      "disbursement",
-      "amount currency method provider reference providerReference status completedAt"
-    )
-    .sort({
+  }).sort({
       "installments.dueDate": 1,
     });
 };
