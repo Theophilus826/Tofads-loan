@@ -420,6 +420,55 @@ const markFailed = async (
 };
 
 // =========================================================
+// RECONCILE PROCESSED WEBHOOK
+// =========================================================
+//
+// Used when a webhook was previously marked processed,
+// but its original result shows that an important
+// downstream action was not completed.
+//
+// This intentionally does NOT change the webhook status.
+// It only updates the stored result.
+//
+// =========================================================
+
+const updateProcessedResult = async (
+  provider,
+  eventId,
+  result,
+) => {
+  if (!provider || !eventId) {
+    return null;
+  }
+
+  const document =
+    await WebhookEvent.findOneAndUpdate(
+      {
+        provider:
+          normalizeProvider(provider),
+
+        eventId:
+          normalizeEventId(eventId),
+
+        status: "processed",
+      },
+
+      {
+        $set: {
+          result,
+        },
+      },
+
+      {
+        returnDocument: "after",
+        runValidators: true,
+      },
+    );
+
+  return document;
+};
+
+// =========================================================
 // EXPORT
 // =========================================================
 
@@ -435,4 +484,6 @@ module.exports = {
   markFailed,
 
   PROCESSING_TIMEOUT_MS,
+  
+  updateProcessedResult,
 };

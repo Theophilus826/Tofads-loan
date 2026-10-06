@@ -7,6 +7,7 @@ const RepaymentScheduleRepository = require("../repositories/RepaymentScheduleRe
 const MandateRepository = require("../repositories/MandateRepository");
 
 const MandateService = require("./MandateService");
+const RepaymentService = require("./RepaymentService");
 
 const createServiceError = (message, statusCode = 400) => {
   const error = new Error(message);
@@ -447,6 +448,358 @@ class AdminRepaymentService {
       throw error;
     }
   }
+  /**
+ * Reconcile an existing Paystack DVA payment that was
+ * successfully credited to the repayment account but
+ * was not applied to the loan.
+ *
+ * This does NOT create another funding transaction.
+ *
+ * It uses the existing provider reference to locate the
+ * original account-funding transaction and then sends the
+ * actual money through RepaymentService.repayFromAccount().
+ */
+static async reconcilePayment({
+  loanId,
+  providerReference,
+  adminUserId,
+}) {
+  // =====================================================
+  // BASIC VALIDATION
+  // =====================================================
+
+  if (!loanId) {
+    throw createServiceError("Loan ID is required");
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(loanId)) {
+    throw createServiceError("Invalid loan ID");
+  }
+
+  if (!adminUserId) {
+    throw createServiceError(
+      "Admin user is required",
+      401,
+    );
+  }
+
+  const normalizedReference =
+    String(providerReference || "").trim();
+
+  if (!normalizedReference) {
+    throw createServiceError(
+      "Provider reference is required",
+    );
+  }
+
+  // =====================================================
+  // LOAD LOAN
+  // =====================================================
+
+  const loan = await Loan.findById(loanId);
+
+  if (!loan) {
+    throw createServiceError(
+      "Loan not found",
+      404,
+    );
+  }
+
+  if (!loan.user) {
+    throw createServiceError(
+      "Loan borrower not found",
+      404,
+    );
+  }
+
+  // =====================================================
+  // LOAN STATUS
+  // =====================================================
+
+  const collectibleStatuses = [
+    "active",
+    "overdue",
+    "defaulted",
+  ];
+
+  if (!collectibleStatuses.includes(loan.status)) {
+    throw createServiceError(
+      `Payment cannot be reconciled for loan with status "${loan.status}"`,
+    );
+  }
+
+  // =====================================================
+  // REPAYMENT SCHEDULE
+  // =====================================================
+
+  const scheduleId =
+    loan.repaymentSchedule?._id ||
+    loan.repaymentSchedule;
+
+  if (!scheduleId) {
+    throw createServiceError(
+      "Repayment schedule is missing from loan",
+      409,
+    );
+  }
+
+  const schedule =
+    await RepaymentScheduleRepository.findByIdInternal(
+      scheduleId,
+    );
+
+  if (!schedule) {
+    throw createServiceError(
+      "Repayment schedule was not found",
+      404,
+    );
+  }
+
+  if (
+    schedule.loan &&
+    String(schedule.loan) !== String(loan._id)
+  ) {
+    throw createServiceError(
+      "Repayment schedule does not belong to this loan",
+      409,
+    );
+  }
+
+  // =====================================================
+  // IDEMPOTENCY CHECK
+  // =====================================================
+
+  const existingRepayment =
+    await Repayment.findOne({
+      provider: "paystack",
+      providerReference: normalizedReference,
+    });
+
+  if (existingRepayment) {
+    return {
+      alreadyProcessed: true,
+      reconciled: true,
+      repaymentId: existingRepayment._id,
+      loanId: loan._id,
+      repaymentScheduleId: schedule._id,
+      provider: "paystack",
+      providerReference: normalizedReference,
+      amount: existingRepayment.amount,
+      status: existingRepayment.status,
+    };
+  }
+
+  // =====================================================
+  // FIND ORIGINAL DVA FUNDING TRANSACTION
+  // =====================================================
+
+  const fundingTransaction =
+    await RepaymentAccountTransactionRepository
+      .findByProviderReference(
+        normalizedReference,
+        "paystack",
+      );
+
+  if (!fundingTransaction) {
+    throw createServiceError(
+      "Paystack funding transaction was not found",
+      404,
+    );
+  }
+
+  // =====================================================
+  // VERIFY TRANSACTION TYPE
+  // =====================================================
+
+  if (
+    fundingTransaction.type !== "credit" ||
+    fundingTransaction.purpose !== "account_funding"
+  ) {
+    throw createServiceError(
+      "Provider reference does not belong to a repayment-account funding transaction",
+      400,
+    );
+  }
+
+  // =====================================================
+  // VERIFY SUCCESSFUL FUNDING
+  // =====================================================
+
+  if (fundingTransaction.status !== "successful") {
+    throw createServiceError(
+      `Funding transaction is not successful. Current status: ${fundingTransaction.status}`,
+      409,
+    );
+  }
+
+  // =====================================================
+  // VERIFY REPAYMENT ACCOUNT
+  // =====================================================
+
+  const repaymentAccount =
+    await RepaymentAccountRepository.findByIdInternal(
+      fundingTransaction.repaymentAccount,
+    );
+
+  if (!repaymentAccount) {
+    throw createServiceError(
+      "Repayment account was not found",
+      404,
+    );
+  }
+
+  if (repaymentAccount.status !== "active") {
+    throw createServiceError(
+      "Repayment account is not active",
+      400,
+    );
+  }
+
+  // =====================================================
+  // VERIFY ACCOUNT OWNER
+  // =====================================================
+
+  if (
+    String(repaymentAccount.user) !==
+    String(loan.user)
+  ) {
+    throw createServiceError(
+      "Payment does not belong to the borrower of this loan",
+      403,
+    );
+  }
+
+  // =====================================================
+  // ACTUAL PAYMENT AMOUNT
+  // =====================================================
+
+  const fundingAmount = Number(
+    Number(fundingTransaction.amount).toFixed(2),
+  );
+
+  if (
+    !Number.isFinite(fundingAmount) ||
+    fundingAmount <= 0
+  ) {
+    throw createServiceError(
+      "Funding transaction has an invalid amount",
+      409,
+    );
+  }
+
+  // =====================================================
+  // LOAN OUTSTANDING
+  // =====================================================
+
+  const outstandingAmount = Number(
+    loan.outstandingAmount || 0,
+  );
+
+  if (
+    !Number.isFinite(outstandingAmount) ||
+    outstandingAmount <= 0
+  ) {
+    throw createServiceError(
+      "Loan has no outstanding balance",
+    );
+  }
+
+  // Never apply more than the outstanding loan balance.
+  const repaymentAmount = Number(
+    Math.min(
+      fundingAmount,
+      outstandingAmount,
+    ).toFixed(2),
+  );
+
+  if (repaymentAmount <= 0) {
+    throw createServiceError(
+      "Nothing can be applied to this loan",
+    );
+  }
+
+  // =====================================================
+  // APPLY USING NORMAL REPAYMENT SERVICE
+  // =====================================================
+  //
+  // This is critical.
+  //
+  // We do NOT:
+  // - edit loan.outstandingAmount directly
+  // - edit repayment account.balance directly
+  // - create a repayment manually
+  //
+  // RepaymentService handles all of that.
+  //
+
+  const repaymentResult =
+    await RepaymentService.repayFromAccount(
+      loan.user,
+      {
+        repaymentScheduleId:
+          schedule._id,
+
+        amount:
+          repaymentAmount,
+
+        provider:
+          "paystack",
+
+        providerReference:
+          normalizedReference,
+
+        providerData: {
+          source:
+            "admin_reconciliation",
+
+          originalFundingTransaction:
+            fundingTransaction._id,
+
+          originalProviderReference:
+            normalizedReference,
+
+          reconciledBy:
+            adminUserId,
+
+          reconciledAt:
+            new Date(),
+        },
+
+        initiatedByRole:
+          "finance_officer",
+      },
+    );
+
+  return {
+    alreadyProcessed: false,
+
+    reconciled: true,
+
+    loanId: loan._id,
+
+    repaymentScheduleId:
+      schedule._id,
+
+    repaymentAccountId:
+      repaymentAccount._id,
+
+    fundingTransactionId:
+      fundingTransaction._id,
+
+    provider:
+      "paystack",
+
+    providerReference:
+      normalizedReference,
+
+    fundingAmount,
+
+    repaymentAmount,
+
+    repayment:
+      repaymentResult,
+  };
+}
 }
 
 module.exports = AdminRepaymentService;

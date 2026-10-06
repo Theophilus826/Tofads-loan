@@ -1,3 +1,4 @@
+
 const AdminRepaymentService = require("../services/AdminRepaymentService");
 const RepaymentRepository = require("../repositories/RepaymentRepository");
 
@@ -10,9 +11,7 @@ const requireAuth = (req, res) => {
       message: "Authentication required",
     });
 
-    ```
-return null;
-```;
+    return null;
   }
 
   return userId;
@@ -27,25 +26,27 @@ const requireParam = (req, res, name, message) => {
       message,
     });
 
-    ```
-return null;
-```;
+    return null;
   }
 
   return value;
 };
 
 /**
-
-* POST /api/admin/loans/:loanId/repayments/collect
-  */
+ * POST /api/admin/loans/:loanId/repayments/collect
+ */
 const collectMandateRepayment = async (req, res, next) => {
   try {
     const adminUserId = requireAuth(req, res);
 
     if (!adminUserId) return;
 
-    const loanId = requireParam(req, res, "loanId", "Loan ID is required");
+    const loanId = requireParam(
+      req,
+      res,
+      "loanId",
+      "Loan ID is required"
+    );
 
     if (!loanId) return;
 
@@ -67,11 +68,12 @@ const collectMandateRepayment = async (req, res, next) => {
       });
     }
 
-    const result = await AdminRepaymentService.collectMandateRepayment({
-      loanId,
-      amount: numericAmount,
-      adminUserId,
-    });
+    const result =
+      await AdminRepaymentService.collectMandateRepayment({
+        loanId,
+        amount: numericAmount,
+        adminUserId,
+      });
 
     const isFailed = result.status === "failed";
 
@@ -96,12 +98,69 @@ const collectMandateRepayment = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/admin/loans/:loanId/repayments/reconcile
+ *
+ * Reconciles an existing successful payment that was credited
+ * to the repayment account but was not applied to the loan.
+ */
+const reconcilePayment = async (req, res, next) => {
+  try {
+    const adminUserId = requireAuth(req, res);
+
+    if (!adminUserId) return;
+
+    const loanId = requireParam(
+      req,
+      res,
+      "loanId",
+      "Loan ID is required"
+    );
+
+    if (!loanId) return;
+
+    const { providerReference } = req.body;
+
+    if (!providerReference) {
+      return res.status(400).json({
+        success: false,
+        message: "Provider reference is required",
+      });
+    }
+
+    const result =
+      await AdminRepaymentService.reconcilePayment({
+        loanId,
+        providerReference: String(providerReference).trim(),
+        adminUserId,
+      });
+
+    return res.status(200).json({
+      success: true,
+      message: result?.alreadyProcessed
+        ? "Payment was already reconciled"
+        : "Payment reconciled successfully",
+      data: result,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const getRepayments = async (req, res, next) => {
   try {
     const adminUserId = requireAuth(req, res);
+
     if (!adminUserId) return;
 
-    const { status, repaymentSource, userId, loanId, page, limit } = req.query;
+    const {
+      status,
+      repaymentSource,
+      userId,
+      loanId,
+      page,
+      limit,
+    } = req.query;
 
     const result = await RepaymentRepository.findAll({
       status: status || null,
@@ -123,5 +182,7 @@ const getRepayments = async (req, res, next) => {
 
 module.exports = {
   collectMandateRepayment,
+  reconcilePayment,
   getRepayments,
 };
+
