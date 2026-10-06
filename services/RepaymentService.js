@@ -1911,11 +1911,16 @@ const processAutoDebitRepayment = async ({
 // update happen in one MongoDB transaction.
 // =========================================================
 
+
 const repayFromAccount = async (
   userId,
   {
     repaymentScheduleId,
     amount,
+    provider = "internal",
+    providerReference = null,
+    providerData = null,
+    initiatedByRole = "customer",
   }
 ) => {
   const repaymentAmount = roundMoney(amount);
@@ -1932,6 +1937,45 @@ const repayFromAccount = async (
       "Repayment amount must be greater than zero",
       400
     );
+  }
+
+  // -------------------------------------------------------
+  // PROVIDER IDEMPOTENCY
+  // -------------------------------------------------------
+
+  if (providerReference) {
+    const existingRepayment =
+      await RepaymentRepository
+        .findByPaymentOrProviderReference(
+          providerReference
+        );
+
+    if (existingRepayment) {
+      console.log(
+        "ℹ️ REPAYMENT ALREADY EXISTS FOR PROVIDER REFERENCE:",
+        {
+          providerReference,
+          repaymentId:
+            existingRepayment._id,
+          status:
+            existingRepayment.status,
+        }
+      );
+
+      return {
+        repayment:
+          existingRepayment,
+
+        alreadyProcessed:
+          existingRepayment.status ===
+          "successful",
+
+        duplicate: true,
+
+        repaymentSource:
+          "repayment_account",
+      };
+    }
   }
 
   // -------------------------------------------------------
@@ -2017,16 +2061,6 @@ const repayFromAccount = async (
         // -------------------------------------------------
         // ATOMIC ACCOUNT DEBIT
         // -------------------------------------------------
-        //
-        // The repository checks:
-        //
-        // balance >= repaymentAmount
-        //
-        // as part of the update itself.
-        //
-        // This prevents concurrent repayment requests
-        // from spending the same balance.
-        // -------------------------------------------------
 
         const balanceBefore =
           roundMoney(
@@ -2093,23 +2127,29 @@ const repayFromAccount = async (
                 userId,
 
               initiatedByRole:
+                initiatedByRole ||
                 "customer",
 
               provider:
+                provider ||
                 "internal",
 
               providerReference:
+                providerReference ||
                 null,
 
               status:
                 "processing",
 
               providerData:
+                providerData ||
                 null,
 
-              allocatedAmount: 0,
+              allocatedAmount:
+                0,
 
-              unallocatedAmount: 0,
+              unallocatedAmount:
+                0,
 
               allocation: [],
             },
@@ -2163,12 +2203,15 @@ const repayFromAccount = async (
                 repayment._id,
 
               provider:
+                provider ||
                 "internal",
 
               providerReference:
+                providerReference ||
                 repayment.paymentReference,
 
               providerData:
+                providerData ||
                 null,
 
               description:
@@ -2178,6 +2221,7 @@ const repayFromAccount = async (
                 userId,
 
               initiatedByRole:
+                initiatedByRole ||
                 "customer",
             },
             {
@@ -2212,19 +2256,6 @@ const repayFromAccount = async (
         // -------------------------------------------------
         // APPLY REPAYMENT
         // -------------------------------------------------
-        //
-        // Reuse your existing allocation engine.
-        // This updates:
-        //
-        // schedule installments
-        // schedule amountPaid
-        // schedule amountOutstanding
-        // loan amountPaid
-        // loan outstandingAmount
-        // repayment allocation
-        // repayment status
-        //
-        // -------------------------------------------------
 
         result =
           await applySuccessfulRepayment({
@@ -2245,12 +2276,18 @@ const repayFromAccount = async (
 
               paymentReference:
                 repayment.paymentReference,
+
+              providerData:
+                providerData ||
+                null,
             },
 
             provider:
+              provider ||
               "internal",
 
             providerReference:
+              providerReference ||
               repayment.paymentReference,
 
             session,
@@ -2268,6 +2305,8 @@ const repayFromAccount = async (
     await session.endSession();
   }
 };
+
+
 
 // =========================================================
 // EXPORT

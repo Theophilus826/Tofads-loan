@@ -5,6 +5,7 @@ const RepaymentRepository = require("../repositories/RepaymentRepository");
 const RepaymentAccountRepository = require("../repositories/RepaymentAccountRepository");
 
 const RepaymentAccountService = require("./RepaymentAccountService");
+const RepaymentService = require("../services/RepaymentService");
 const AdminDisbursementService = require("./AdminDisbursementService");
 
 const {
@@ -2466,7 +2467,7 @@ const handleChargeSuccess =
       payload?.reference ||
       null;
 
-    // =====================================================
+       // =====================================================
     // DVA TRANSFER
     // =====================================================
 
@@ -2524,10 +2525,17 @@ const handleChargeSuccess =
         );
       }
 
+      // Paystack amount is KOBO.
       const amountInNaira =
-        numericAmount / 100;
+        Number(
+          (numericAmount / 100).toFixed(2),
+        );
 
-      const result =
+      // ---------------------------------------------------
+      // 1. CREDIT REPAYMENT ACCOUNT
+      // ---------------------------------------------------
+
+      const fundingResult =
         await RepaymentAccountService
           .creditDedicatedVirtualAccount({
             accountNumber,
@@ -2541,6 +2549,265 @@ const handleChargeSuccess =
               payload?.data ||
               payload,
           });
+
+      // ---------------------------------------------------
+      // 2. FIND REPAYMENT ACCOUNT
+      // ---------------------------------------------------
+
+      const repaymentAccount =
+        await RepaymentAccountRepository
+           .findActiveByAccountNumber(
+            accountNumber,
+          );
+
+      if (!repaymentAccount) {
+        throw createError(
+          `Repayment account not found for DVA account ${accountNumber}`,
+          404,
+        );
+      }
+
+      // ---------------------------------------------------
+      // 3. FIND OUTSTANDING LOAN
+      //
+      // Oldest outstanding active/overdue/defaulted
+      // loan is selected.
+      // ---------------------------------------------------
+
+      const Loan =
+        require("../models/Loan");
+
+      const loan =
+        await Loan.findOne({
+          user:
+            repaymentAccount.user,
+
+          status: {
+            $in: [
+              "active",
+              "overdue",
+              "defaulted",
+            ],
+          },
+
+          outstandingAmount: {
+            $gt: 0,
+          },
+        })
+          .sort({
+            createdAt: 1,
+          });
+
+      // ---------------------------------------------------
+      // NO OUTSTANDING LOAN
+      //
+      // Leave the money in the repayment account.
+      // ---------------------------------------------------
+
+      if (!loan) {
+        console.log(
+          "ℹ️ DVA FUNDED BUT NO OUTSTANDING LOAN:",
+          {
+            accountNumber,
+            userId:
+              repaymentAccount.user,
+            amount:
+              amountInNaira,
+            providerReference,
+          },
+        );
+
+        return {
+          processed: true,
+
+          type:
+            "repayment_account_dva_funding",
+
+          reference:
+            providerReference,
+
+          accountNumber,
+
+          amount:
+            amountInNaira,
+
+          repaymentApplied:
+            false,
+
+          reason:
+            "No outstanding loan found",
+
+          funding:
+            fundingResult,
+        };
+      }
+
+      // ---------------------------------------------------
+      // 4. GET REPAYMENT SCHEDULE
+      // ---------------------------------------------------
+
+      if (!loan.repaymentSchedule) {
+        console.warn(
+          "⚠️ DVA FUNDED BUT LOAN HAS NO REPAYMENT SCHEDULE:",
+          {
+            loanId:
+              loan._id,
+
+            userId:
+              repaymentAccount.user,
+
+            amount:
+              amountInNaira,
+          },
+        );
+
+        return {
+          processed: true,
+
+          type:
+            "repayment_account_dva_funding",
+
+          reference:
+            providerReference,
+
+          accountNumber,
+
+          amount:
+            amountInNaira,
+
+          repaymentApplied:
+            false,
+
+          reason:
+            "Loan has no repayment schedule",
+
+          loanId:
+            loan._id,
+
+          funding:
+            fundingResult,
+        };
+      }
+
+      // ---------------------------------------------------
+      // 5. NEVER REPAY MORE THAN LOAN OUTSTANDING
+      // ---------------------------------------------------
+
+      const loanOutstanding =
+        Number(
+          loan.outstandingAmount || 0,
+        );
+
+      const repaymentAmount =
+        Number(
+          Math.min(
+            amountInNaira,
+            loanOutstanding,
+          ).toFixed(2),
+        );
+
+      if (
+        !Number.isFinite(
+          repaymentAmount,
+        ) ||
+        repaymentAmount <= 0
+      ) {
+        return {
+          processed: true,
+
+          type:
+            "repayment_account_dva_funding",
+
+          reference:
+            providerReference,
+
+          accountNumber,
+
+          amount:
+            amountInNaira,
+
+          repaymentApplied:
+            false,
+
+          reason:
+            "Loan has no repayable outstanding balance",
+
+          loanId:
+            loan._id,
+
+          funding:
+            fundingResult,
+        };
+      }
+
+      // ---------------------------------------------------
+      // 6. AUTOMATICALLY REPAY FROM REPAYMENT ACCOUNT
+      // ---------------------------------------------------
+
+      console.log(
+        "🔄 AUTO-REPAYING LOAN FROM DVA:",
+        {
+          loanId:
+            loan._id,
+
+          userId:
+            repaymentAccount.user,
+
+          repaymentScheduleId:
+            loan.repaymentSchedule,
+
+          accountNumber,
+
+          amountReceived:
+            amountInNaira,
+
+          repaymentAmount,
+
+          loanOutstanding,
+
+          providerReference,
+        },
+      );
+
+      const repaymentResult =
+        await RepaymentService
+          .repayFromAccount(
+            repaymentAccount.user,
+            {
+              repaymentScheduleId:
+                loan.repaymentSchedule,
+
+              amount:
+                repaymentAmount,
+            },
+          );
+
+      console.log(
+        "✅ DVA AUTOMATIC REPAYMENT COMPLETED:",
+        {
+          loanId:
+            loan._id,
+
+          userId:
+            repaymentAccount.user,
+
+          accountNumber,
+
+          amount:
+            repaymentAmount,
+
+          providerReference,
+
+          repaymentId:
+            repaymentResult?.repayment?._id ||
+            repaymentResult?._id ||
+            null,
+        },
+      );
+
+      // ---------------------------------------------------
+      // 7. RETURN COMPLETE RESULT
+      // ---------------------------------------------------
 
       return {
         processed: true,
@@ -2556,7 +2823,22 @@ const handleChargeSuccess =
         amount:
           amountInNaira,
 
-        result,
+        repaymentApplied:
+          true,
+
+        repaymentAmount,
+
+        loanId:
+          loan._id,
+
+        repaymentScheduleId:
+          loan.repaymentSchedule,
+
+        funding:
+          fundingResult,
+
+        repayment:
+          repaymentResult,
       };
     }
 
