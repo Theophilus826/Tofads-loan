@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const Loan = require("../model/Loan");
@@ -28,11 +27,7 @@ class AdminRepaymentService {
    * The loan balance is updated only after Paystack
    * confirms the payment through the webhook.
    */
-  static async collectMandateRepayment({
-    loanId,
-    amount,
-    adminUserId,
-  }) {
+  static async collectMandateRepayment({ loanId, amount, adminUserId }) {
     // =====================================================
     // BASIC VALIDATION
     // =====================================================
@@ -52,9 +47,7 @@ class AdminRepaymentService {
     const numericAmount = Number(amount);
 
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      throw createServiceError(
-        "Repayment amount must be greater than zero",
-      );
+      throw createServiceError("Repayment amount must be greater than zero");
     }
 
     const repaymentAmount = Number(numericAmount.toFixed(2));
@@ -80,11 +73,7 @@ class AdminRepaymentService {
     // LOAN STATUS
     // =====================================================
 
-    const collectibleStatuses = [
-      "active",
-      "overdue",
-      "defaulted",
-    ];
+    const collectibleStatuses = ["active", "overdue", "defaulted"];
 
     if (!collectibleStatuses.includes(loan.status)) {
       throw createServiceError(
@@ -96,17 +85,10 @@ class AdminRepaymentService {
     // OUTSTANDING BALANCE
     // =====================================================
 
-    const outstandingAmount = Number(
-      loan.outstandingAmount || 0,
-    );
+    const outstandingAmount = Number(loan.outstandingAmount || 0);
 
-    if (
-      !Number.isFinite(outstandingAmount) ||
-      outstandingAmount <= 0
-    ) {
-      throw createServiceError(
-        "Loan has no outstanding balance",
-      );
+    if (!Number.isFinite(outstandingAmount) || outstandingAmount <= 0) {
+      throw createServiceError("Loan has no outstanding balance");
     }
 
     if (repaymentAmount > outstandingAmount) {
@@ -121,22 +103,14 @@ class AdminRepaymentService {
 
     let schedule = null;
 
-    const scheduleId =
-      loan.repaymentSchedule?._id ||
-      loan.repaymentSchedule;
+    const scheduleId = loan.repaymentSchedule?._id || loan.repaymentSchedule;
 
     if (scheduleId) {
-      schedule =
-        await RepaymentScheduleRepository.findByIdInternal(
-          scheduleId,
-        );
+      schedule = await RepaymentScheduleRepository.findByIdInternal(scheduleId);
     }
 
     if (!schedule) {
-      schedule =
-        await RepaymentScheduleRepository.findByLoanInternal(
-          loan._id,
-        );
+      schedule = await RepaymentScheduleRepository.findByLoanInternal(loan._id);
     }
 
     if (!schedule) {
@@ -150,10 +124,7 @@ class AdminRepaymentService {
     // SECURITY CHECK
     // =====================================================
 
-    if (
-      schedule.loan &&
-      String(schedule.loan) !== String(loan._id)
-    ) {
+    if (schedule.loan && String(schedule.loan) !== String(loan._id)) {
       throw createServiceError(
         "Repayment schedule does not belong to this loan",
         409,
@@ -165,8 +136,7 @@ class AdminRepaymentService {
     // =====================================================
 
     const currentScheduleId =
-      loan.repaymentSchedule?._id ||
-      loan.repaymentSchedule;
+      loan.repaymentSchedule?._id || loan.repaymentSchedule;
 
     if (
       !currentScheduleId ||
@@ -201,26 +171,20 @@ class AdminRepaymentService {
     let mandate = loan.mandate;
 
     if (!mandate && loan.loanOffer) {
-      mandate =
-        await MandateRepository.findByLoanOffer(
-          loan.loanOffer._id || loan.loanOffer,
-        );
+      mandate = await MandateRepository.findByLoanOffer(
+        loan.loanOffer._id || loan.loanOffer,
+      );
     }
 
     if (!mandate) {
-      throw createServiceError(
-        "No repayment mandate is attached to this loan",
-      );
+      throw createServiceError("No repayment mandate is attached to this loan");
     }
 
     // =====================================================
     // MANDATE OWNERSHIP
     // =====================================================
 
-    if (
-      mandate.user &&
-      String(mandate.user) !== String(loan.user._id)
-    ) {
+    if (mandate.user && String(mandate.user) !== String(loan.user._id)) {
       throw createServiceError(
         "Mandate does not belong to the loan borrower",
         403,
@@ -231,11 +195,7 @@ class AdminRepaymentService {
     // MANDATE STATUS
     // =====================================================
 
-    if (
-      !["active", "authorized"].includes(
-        mandate.status,
-      )
-    ) {
+    if (!["active", "authorized"].includes(mandate.status)) {
       throw createServiceError(
         `Mandate is not active. Current status: ${mandate.status}`,
       );
@@ -246,18 +206,14 @@ class AdminRepaymentService {
     // =====================================================
 
     if (!mandate.mandateReference) {
-      throw createServiceError(
-        "Mandate reference is missing",
-      );
+      throw createServiceError("Mandate reference is missing");
     }
 
     // =====================================================
     // MANDATE AMOUNT LIMIT
     // =====================================================
 
-    const mandateAmountLimit = Number(
-      mandate.amountLimit || 0,
-    );
+    const mandateAmountLimit = Number(mandate.amountLimit || 0);
 
     if (
       Number.isFinite(mandateAmountLimit) &&
@@ -273,22 +229,25 @@ class AdminRepaymentService {
     // PREVENT DUPLICATE PROCESSING
     // =====================================================
 
-    const existingProcessingRepayment =
-      await Repayment.findOne({
-        loan: loan._id,
+    const existingProcessingRepayment = await Repayment.findOne({
+      loan: loan._id,
 
-        repaymentSource: "mandate",
+      repaymentSource: "mandate",
 
-        status: {
-          $in: ["pending", "processing"],
-        },
-      }).sort({
-        createdAt: -1,
-      });
+      status: {
+        $in: ["pending", "processing"],
+      },
+    }).sort({
+      createdAt: -1,
+    });
 
     if (existingProcessingRepayment) {
       throw createServiceError(
-        "A mandate repayment is already being processed for this loan",
+        `A mandate repayment is already being processed for this loan. Reference: ${
+          existingProcessingRepayment.paymentReference ||
+          existingProcessingRepayment.providerReference ||
+          existingProcessingRepayment._id
+        }`,
         409,
       );
     }
@@ -297,10 +256,9 @@ class AdminRepaymentService {
     // PAYMENT REFERENCE
     // =====================================================
 
-    const paymentReference =
-      `REPAY-${loan.loanNumber || loan._id}-${Date.now()}-${Math.floor(
-        Math.random() * 100000,
-      )}`;
+    const paymentReference = `REPAY-${loan.loanNumber || loan._id}-${Date.now()}-${Math.floor(
+      Math.random() * 100000,
+    )}`;
 
     // =====================================================
     // CREATE INTERNAL REPAYMENT
@@ -311,9 +269,7 @@ class AdminRepaymentService {
 
       loan: loan._id,
 
-      loanOffer:
-        loan.loanOffer?._id ||
-        loan.loanOffer,
+      loanOffer: loan.loanOffer?._id || loan.loanOffer,
 
       loanApplication: loanApplicationId,
 
@@ -347,15 +303,14 @@ class AdminRepaymentService {
     // =====================================================
 
     try {
-      const chargeResult =
-        await MandateService.chargeAuthorization(
-          mandate.mandateReference,
-          repaymentAmount,
-          {
-            reference: paymentReference,
-            currency: "NGN",
-          },
-        );
+      const chargeResult = await MandateService.chargeAuthorization(
+        mandate.mandateReference,
+        repaymentAmount,
+        {
+          reference: paymentReference,
+          currency: "NGN",
+        },
+      );
 
       // ===================================================
       // PROVIDER REFERENCE
@@ -373,9 +328,9 @@ class AdminRepaymentService {
 
       const providerStatus = String(
         chargeResult?.status ||
-        chargeResult?.providerData?.status ||
-        chargeResult?.data?.status ||
-        "",
+          chargeResult?.providerData?.status ||
+          chargeResult?.data?.status ||
+          "",
       ).toLowerCase();
 
       // ===================================================
@@ -384,10 +339,7 @@ class AdminRepaymentService {
 
       let repaymentStatus = "processing";
 
-      if (
-        providerStatus === "failed" ||
-        providerStatus === "failure"
-      ) {
+      if (providerStatus === "failed" || providerStatus === "failure") {
         repaymentStatus = "failed";
       }
 
@@ -396,9 +348,7 @@ class AdminRepaymentService {
       // ===================================================
 
       const providerData =
-        chargeResult?.providerData ||
-        chargeResult?.data ||
-        {};
+        chargeResult?.providerData || chargeResult?.data || {};
 
       const failureReason =
         providerData?.gateway_response ||
@@ -420,26 +370,22 @@ class AdminRepaymentService {
 
       if (repaymentStatus === "failed") {
         updateData.failureReason =
-          failureReason ||
-          "Paystack mandate charge failed";
+          failureReason || "Paystack mandate charge failed";
       }
 
-      const updatedRepayment =
-        await Repayment.findByIdAndUpdate(
-          repayment._id,
-          {
-            $set: updateData,
-          },
-          {
-            returnDocument: "after",
-            runValidators: true,
-          },
-        );
+      const updatedRepayment = await Repayment.findByIdAndUpdate(
+        repayment._id,
+        {
+          $set: updateData,
+        },
+        {
+          returnDocument: "after",
+          runValidators: true,
+        },
+      );
 
       if (!updatedRepayment) {
-        throw new Error(
-          "Repayment record could not be updated",
-        );
+        throw new Error("Repayment record could not be updated");
       }
 
       // ===================================================
@@ -469,9 +415,7 @@ class AdminRepaymentService {
         status: repaymentStatus,
 
         failureReason:
-          repaymentStatus === "failed"
-            ? updatedRepayment.failureReason
-            : null,
+          repaymentStatus === "failed" ? updatedRepayment.failureReason : null,
 
         provider: "paystack",
       };
@@ -486,16 +430,11 @@ class AdminRepaymentService {
           $set: {
             status: "failed",
 
-            failureReason:
-              error?.message ||
-              "Paystack mandate charge failed",
+            failureReason: error?.message || "Paystack mandate charge failed",
 
-            ...(error?.response?.data ||
-            error?.response
+            ...(error?.response?.data || error?.response
               ? {
-                  providerData:
-                    error.response.data ||
-                    error.response,
+                  providerData: error.response.data || error.response,
                 }
               : {}),
           },
@@ -511,4 +450,3 @@ class AdminRepaymentService {
 }
 
 module.exports = AdminRepaymentService;
-
