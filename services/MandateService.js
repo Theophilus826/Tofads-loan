@@ -1140,6 +1140,10 @@ class MandateService {
   // CHARGE AUTHORIZATION
   // ====================================================
 
+  // ====================================================
+  // CHARGE AUTHORIZATION
+  // ====================================================
+
   async chargeAuthorization(mandateReference, amount, options = {}) {
     if (!mandateReference) {
       throw badRequest(
@@ -1165,6 +1169,10 @@ class MandateService {
       throw notFound("MANDATE_NOT_FOUND", "Mandate not found");
     }
 
+    // ==================================================
+    // MANDATE STATUS
+    // ==================================================
+
     if (!ACTIVE_STATUSES.includes(mandate.status)) {
       throw badRequest(
         "MANDATE_NOT_ACTIVE",
@@ -1175,12 +1183,50 @@ class MandateService {
       );
     }
 
+    // ==================================================
+    // AUTHORIZATION CODE
+    // ==================================================
+
     if (!mandate.authorizationCode) {
       throw badRequest(
         "MANDATE_AUTHORIZATION_CODE_MISSING",
         "Reusable card authorization code is missing",
       );
     }
+
+    const authorizationCode = String(mandate.authorizationCode).trim();
+
+    if (!authorizationCode.toUpperCase().startsWith("AUTH_")) {
+      throw badRequest(
+        "MANDATE_INVALID_AUTHORIZATION_CODE",
+        "Mandate does not contain a valid reusable Paystack authorization code",
+      );
+    }
+
+    // ==================================================
+    // MANDATE AMOUNT LIMIT
+    // ==================================================
+
+    const amountLimit = Number(mandate.amountLimit || 0);
+
+    if (
+      Number.isFinite(amountLimit) &&
+      amountLimit > 0 &&
+      numericAmount > amountLimit
+    ) {
+      throw badRequest(
+        "MANDATE_AMOUNT_LIMIT_EXCEEDED",
+        `Repayment amount cannot exceed the mandate amount limit of ${amountLimit}`,
+        {
+          amount: numericAmount,
+          amountLimit,
+        },
+      );
+    }
+
+    // ==================================================
+    // LOAD USER
+    // ==================================================
 
     const user = await UserModel.findById(mandate.user);
 
@@ -1190,32 +1236,152 @@ class MandateService {
 
     const email = getCustomerEmail(user);
 
+    // ==================================================
+    // PAYMENT REFERENCE
+    // ==================================================
+
+    const paymentReference = String(
+      options.reference || `LOAN-${mandate.mandateReference}-${Date.now()}`,
+    ).trim();
+
+    if (!paymentReference) {
+      throw badRequest(
+        "MANDATE_PAYMENT_REFERENCE_REQUIRED",
+        "Payment reference is required",
+      );
+    }
+
+    // ==================================================
+    // CURRENCY
+    // ==================================================
+
+    const currency = String(options.currency || "NGN")
+      .trim()
+      .toUpperCase();
+
+    // ==================================================
+    // CHARGE PAYSTACK
+    // ==================================================
+
     try {
       const result = await MandateProvider.chargeAuthorization({
-        authorizationCode: mandate.authorizationCode,
+        authorizationCode,
 
         email,
 
+        /*
+         * MandateProvider is responsible for converting
+         * the NGN amount into kobo before sending to
+         * Paystack.
+         *
+         * Example:
+         *
+         * ₦100 -> 10000 kobo
+         */
         amount: numericAmount,
 
-        reference:
-          options.reference || `LOAN-${mandate.mandateReference}-${Date.now()}`,
+        currency,
 
-        currency: options.currency || "NGN",
+        reference: paymentReference,
 
         metadata: {
           mandateReference: mandate.mandateReference,
 
           userId: String(mandate.user),
 
-          loanOfferId: String(mandate.loanOffer),
+          loanOfferId: mandate.loanOffer ? String(mandate.loanOffer) : null,
+
+          loanApplicationId: mandate.loanApplication
+            ? String(mandate.loanApplication)
+            : null,
 
           purpose: "LOAN_REPAYMENT",
         },
       });
 
-      return result;
+      // ==================================================
+      // NORMALIZE PROVIDER RESPONSE
+      // ==================================================
+
+      const providerReference =
+        result?.reference || result?.data?.reference || paymentReference;
+
+      const providerTransactionId =
+        result?.id || result?.transaction_id || result?.data?.id || null;
+
+      const providerStatus = String(
+        result?.status || result?.data?.status || "",
+      ).toLowerCase();
+
+      const providerAmount = result?.amount || result?.data?.amount || null;
+
+      const providerCurrency =
+        result?.currency || result?.data?.currency || currency;
+
+      // ==================================================
+      // FAILURE INFORMATION
+      // ==================================================
+
+      const gatewayResponse =
+        result?.gateway_response ||
+        result?.data?.gateway_response ||
+        result?.message ||
+        result?.data?.message ||
+        null;
+
+      const gatewayResponseCode =
+        result?.gateway_response_code ||
+        result?.data?.gateway_response_code ||
+        null;
+
+      const responseCode =
+        result?.response_code || result?.data?.response_code || null;
+
+      // ==================================================
+      // RETURN NORMALIZED RESULT
+      // ==================================================
+
+      return {
+        /*
+         * This means the provider request itself returned
+         * a response successfully.
+         *
+         * It does NOT mean the payment succeeded.
+         */
+        requestSuccessful: true,
+
+        reference: providerReference,
+
+        providerReference,
+
+        providerTransactionId,
+
+        status: providerStatus,
+
+        amount: providerAmount,
+
+        currency: providerCurrency,
+
+        authorizationCode,
+
+        failureReason:
+          providerStatus === "failed" || providerStatus === "failure"
+            ? gatewayResponse || "Paystack mandate charge failed"
+            : null,
+
+        gatewayResponse,
+
+        gatewayResponseCode,
+
+        responseCode,
+
+        providerData: result,
+      };
     } catch (error) {
+      if (error instanceof ServiceError) {
+        throw error;
+      }
+
       throw serverError(
         "PAYSTACK_REPAYMENT_CHARGE_FAILED",
         getProviderErrorMessage(error),

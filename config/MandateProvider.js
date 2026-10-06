@@ -714,9 +714,7 @@ const chargeAuthorization = async ({
   }
 
   const normalizedAuthorizationCode =
-    String(
-      authorizationCode,
-    ).trim();
+    String(authorizationCode).trim();
 
   if (!normalizedAuthorizationCode) {
     throw createValidationError(
@@ -751,6 +749,9 @@ const chargeAuthorization = async ({
     );
   }
 
+  const normalizedEmail =
+    String(email).trim().toLowerCase();
+
   // ----------------------------------------------------------
   // AMOUNT
   // ----------------------------------------------------------
@@ -765,6 +766,25 @@ const chargeAuthorization = async ({
     );
   }
 
+  const numericAmount = Number(amount);
+
+  if (
+    !Number.isFinite(numericAmount) ||
+    numericAmount <= 0
+  ) {
+    throw createValidationError(
+      "Charge amount must be greater than zero",
+      400,
+    );
+  }
+
+  // ----------------------------------------------------------
+  // KOBO AMOUNT
+  // ----------------------------------------------------------
+
+  const amountInKobo =
+    toKobo(numericAmount);
+
   // ----------------------------------------------------------
   // PAYLOAD
   // ----------------------------------------------------------
@@ -773,10 +793,10 @@ const chargeAuthorization = async ({
     authorization_code:
       normalizedAuthorizationCode,
 
-    email: String(email).trim(),
+    email: normalizedEmail,
 
     amount: String(
-      toKobo(amount),
+      amountInKobo,
     ),
 
     currency,
@@ -788,31 +808,51 @@ const chargeAuthorization = async ({
   }
 
   if (metadata) {
-    payload.metadata =
-      metadata;
+    payload.metadata = metadata;
   }
 
   // ----------------------------------------------------------
-  // CHARGE
+  // DEBUG LOG
+  // ----------------------------------------------------------
+
+  console.log(
+    "================================="
+  );
+
+  console.log(
+    "🚀 PAYSTACK CHARGE AUTHORIZATION"
+  );
+
+  console.log({
+    email: normalizedEmail,
+
+    amount: numericAmount,
+
+    amountInKobo,
+
+    currency,
+
+    reference:
+      payload.reference || null,
+
+    authorizationCodePresent:
+      Boolean(
+        normalizedAuthorizationCode
+      ),
+  });
+
+  console.log(
+    "PAYSTACK ENDPOINT:",
+    "/transaction/charge_authorization"
+  );
+
+  // ----------------------------------------------------------
+  // CHARGE PAYSTACK
   // ----------------------------------------------------------
 
   try {
     console.log(
-      "PAYSTACK CHARGE AUTHORIZATION:",
-      {
-        authorizationCode:
-          normalizedAuthorizationCode,
-
-        email: payload.email,
-
-        amount,
-
-        currency,
-
-        reference:
-          payload.reference ||
-          null,
-      },
+      "📡 Sending request to Paystack..."
     );
 
     const response =
@@ -821,13 +861,39 @@ const chargeAuthorization = async ({
         payload,
       );
 
+    // --------------------------------------------------------
+    // RAW PAYSTACK RESPONSE
+    // --------------------------------------------------------
+
+    console.log(
+      "✅ Paystack HTTP response received"
+    );
+
+    console.log(
+      "PAYSTACK HTTP STATUS:",
+      response?.status
+    );
+
+    console.log(
+      "PAYSTACK RESPONSE:",
+      response?.data
+    );
+
     const responseData =
       response?.data;
+
+    // --------------------------------------------------------
+    // VALIDATE RESPONSE
+    // --------------------------------------------------------
 
     if (
       !responseData?.status ||
       !responseData?.data
     ) {
+      console.error(
+        "❌ Paystack returned an invalid response"
+      );
+
       throw createProviderError(
         responseData?.message ||
           "Unable to charge card authorization",
@@ -839,8 +905,50 @@ const chargeAuthorization = async ({
       );
     }
 
+    console.log(
+      "✅ Paystack charge request accepted"
+    );
+
     return responseData.data;
+
   } catch (error) {
+
+    // --------------------------------------------------------
+    // PAYSTACK ERROR
+    // --------------------------------------------------------
+
+    console.error(
+      "================================="
+    );
+
+    console.error(
+      "❌ PAYSTACK CHARGE FAILED"
+    );
+
+    console.error(
+      "ERROR MESSAGE:",
+      error?.message
+    );
+
+    console.error(
+      "HTTP STATUS:",
+      error?.response?.status
+    );
+
+    console.error(
+      "PAYSTACK RESPONSE:",
+      error?.response?.data
+    );
+
+    console.error(
+      "ERROR CODE:",
+      error?.code
+    );
+
+    console.error(
+      "================================="
+    );
+
     throw normalizePaystackError(
       error,
       "Unable to charge card authorization",

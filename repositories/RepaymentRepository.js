@@ -4,14 +4,8 @@ const Repayment = require("../model/RepaymentModel");
 // CREATE
 // =========================================================
 
-const create = async (
-  data,
-  options = {}
-) => {
-  const result = await Repayment.create(
-    [data],
-    options
-  );
+const create = async (data, options = {}) => {
+  const result = await Repayment.create([data], options);
 
   return result[0];
 };
@@ -20,34 +14,24 @@ const create = async (
 // CUSTOMER
 // =========================================================
 
-const findById = async (
-  repaymentId,
-  userId
-) => {
+const findById = async (repaymentId, userId) => {
   return Repayment.findOne({
     _id: repaymentId,
     user: userId,
   })
     .populate(
       "loan",
-      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency",
     )
     .populate("repaymentSchedule")
-    .populate(
-      "loanApplication",
-      "applicationNumber amountRequested status"
-    );
+    .populate("loanApplication", "applicationNumber amountRequested status");
 };
 
 // =========================================================
 // CUSTOMER - WITH SESSION
 // =========================================================
 
-const findByIdWithSession = async (
-  repaymentId,
-  userId,
-  session
-) => {
+const findByIdWithSession = async (repaymentId, userId, session) => {
   return Repayment.findOne({
     _id: repaymentId,
     user: userId,
@@ -55,26 +39,18 @@ const findByIdWithSession = async (
     .session(session)
     .populate(
       "loan",
-      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency",
     )
     .populate("repaymentSchedule")
-    .populate(
-      "loanApplication",
-      "applicationNumber amountRequested status"
-    );
+    .populate("loanApplication", "applicationNumber amountRequested status");
 };
 
 // =========================================================
 // INTERNAL
 // =========================================================
 
-const findByIdInternal = async (
-  repaymentId,
-  session = null
-) => {
-  const query = Repayment.findById(
-    repaymentId
-  );
+const findByIdInternal = async (repaymentId, session = null) => {
+  const query = Repayment.findById(repaymentId);
 
   if (session) {
     query.session(session);
@@ -87,52 +63,30 @@ const findByIdInternal = async (
 // ADMIN
 // =========================================================
 
-const findByIdAdmin = async (
-  repaymentId
-) => {
-  return Repayment.findById(
-    repaymentId
-  )
-    .populate(
-      "user",
-      "firstName lastName name email phone"
-    )
+const findByIdAdmin = async (repaymentId) => {
+  return Repayment.findById(repaymentId)
+    .populate("user", "firstName lastName name email phone")
     .populate(
       "loan",
-      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency",
     )
-    .populate(
-      "loanApplication",
-      "applicationNumber amountRequested status"
-    )
-    .populate(
-      "repaymentSchedule"
-    )
-    .populate(
-      "repaymentAccount"
-    )
-    .populate(
-      "mandate"
-    );
+    .populate("loanApplication", "applicationNumber amountRequested status")
+    .populate("repaymentSchedule")
+    .populate("repaymentAccount")
+    .populate("mandate");
 };
 
 // =========================================================
 // PROVIDER REFERENCE
 // =========================================================
 
-const findByProviderReference = async (
-  providerReference
-) => {
-  if (
-    !providerReference ||
-    !String(providerReference).trim()
-  ) {
+const findByProviderReference = async (providerReference) => {
+  if (!providerReference || !String(providerReference).trim()) {
     return null;
   }
 
   return Repayment.findOne({
-    providerReference:
-      String(providerReference).trim(),
+    providerReference: String(providerReference).trim(),
   });
 };
 
@@ -140,19 +94,13 @@ const findByProviderReference = async (
 // PAYMENT REFERENCE
 // =========================================================
 
-const findByPaymentReference = async (
-  paymentReference
-) => {
-  if (
-    !paymentReference ||
-    !String(paymentReference).trim()
-  ) {
+const findByPaymentReference = async (paymentReference) => {
+  if (!paymentReference || !String(paymentReference).trim()) {
     return null;
   }
 
   return Repayment.findOne({
-    paymentReference:
-      String(paymentReference).trim(),
+    paymentReference: String(paymentReference).trim(),
   });
 };
 
@@ -160,26 +108,16 @@ const findByPaymentReference = async (
 // PENDING PAYMENT
 // =========================================================
 
-const findPendingByReference = async (
-  paymentReference,
-  session = null
-) => {
-  if (
-    !paymentReference ||
-    !String(paymentReference).trim()
-  ) {
+const findPendingByReference = async (paymentReference, session = null) => {
+  if (!paymentReference || !String(paymentReference).trim()) {
     return null;
   }
 
   const query = Repayment.findOne({
-    paymentReference:
-      String(paymentReference).trim(),
+    paymentReference: String(paymentReference).trim(),
 
     status: {
-      $in: [
-        "pending",
-        "processing",
-      ],
+      $in: ["pending", "processing"],
     },
   });
 
@@ -199,24 +137,17 @@ const findPendingByReference = async (
 
 const findPendingByProviderReference = async (
   providerReference,
-  session = null
+  session = null,
 ) => {
-  if (
-    !providerReference ||
-    !String(providerReference).trim()
-  ) {
+  if (!providerReference || !String(providerReference).trim()) {
     return null;
   }
 
   const query = Repayment.findOne({
-    providerReference:
-      String(providerReference).trim(),
+    providerReference: String(providerReference).trim(),
 
     status: {
-      $in: [
-        "pending",
-        "processing",
-      ],
+      $in: ["pending", "processing"],
     },
   });
 
@@ -231,19 +162,15 @@ const findPendingByProviderReference = async (
 // BY LOAN
 // =========================================================
 
-const findByLoan = async (
-  loanId
-) => {
+const findByLoan = async (loanId) => {
   return Repayment.find({
     loan: loanId,
   })
     .populate(
       "loan",
-      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency"
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status repaymentFrequency",
     )
-    .populate(
-      "repaymentSchedule"
-    )
+    .populate("repaymentSchedule")
     .sort({
       createdAt: -1,
     });
@@ -253,12 +180,9 @@ const findByLoan = async (
 // BY SCHEDULE
 // =========================================================
 
-const findBySchedule = async (
-  repaymentScheduleId
-) => {
+const findBySchedule = async (repaymentScheduleId) => {
   return Repayment.find({
-    repaymentSchedule:
-      repaymentScheduleId,
+    repaymentSchedule: repaymentScheduleId,
   }).sort({
     createdAt: -1,
   });
@@ -268,31 +192,26 @@ const findBySchedule = async (
 // BY USER
 // =========================================================
 
-const findByUser = async (
-  userId
-) => {
+const findByUser = async (userId) => {
   return Repayment.find({
     user: userId,
   })
     .populate(
       "loan",
-      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status"
+      "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status",
     )
     .populate(
       "repaymentSchedule",
-      "principalAmount totalRepaymentAmount amountPaid amountOutstanding status startDate finalDueDate"
+      "principalAmount totalRepaymentAmount amountPaid amountOutstanding status startDate finalDueDate",
     )
-    .populate(
-      "loanApplication",
-      "applicationNumber amountRequested status"
-    )
+    .populate("loanApplication", "applicationNumber amountRequested status")
     .populate(
       "repaymentAccount",
-      "accountNumber accountName bankName currency balance status"
+      "accountNumber accountName bankName currency balance status",
     )
     .populate(
       "mandate",
-      "mandateReference provider status amountLimit frequency startDate endDate card"
+      "mandateReference provider status amountLimit frequency startDate endDate card",
     )
     .sort({
       createdAt: -1,
@@ -303,10 +222,7 @@ const findByUser = async (
 // BY USER + SOURCE
 // =========================================================
 
-const findByUserAndSource = async (
-  userId,
-  repaymentSource
-) => {
+const findByUserAndSource = async (userId, repaymentSource) => {
   return Repayment.find({
     user: userId,
     repaymentSource,
@@ -319,12 +235,9 @@ const findByUserAndSource = async (
 // BY REPAYMENT ACCOUNT
 // =========================================================
 
-const findByRepaymentAccount = async (
-  repaymentAccountId
-) => {
+const findByRepaymentAccount = async (repaymentAccountId) => {
   return Repayment.find({
-    repaymentAccount:
-      repaymentAccountId,
+    repaymentAccount: repaymentAccountId,
   }).sort({
     createdAt: -1,
   });
@@ -334,9 +247,7 @@ const findByRepaymentAccount = async (
 // BY MANDATE
 // =========================================================
 
-const findByMandate = async (
-  mandateId
-) => {
+const findByMandate = async (mandateId) => {
   return Repayment.find({
     mandate: mandateId,
   }).sort({
@@ -363,8 +274,7 @@ const findAll = async ({
   }
 
   if (repaymentSource) {
-    query.repaymentSource =
-      repaymentSource;
+    query.repaymentSource = repaymentSource;
   }
 
   if (userId) {
@@ -375,47 +285,27 @@ const findAll = async ({
     query.loan = loanId;
   }
 
-  const safePage = Math.max(
-    1,
-    Number(page) || 1
-  );
+  const safePage = Math.max(1, Number(page) || 1);
 
-  const safeLimit = Math.min(
-    100,
-    Math.max(
-      1,
-      Number(limit) || 20
-    )
-  );
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
 
-  const skip =
-    (safePage - 1) *
-    safeLimit;
+  const skip = (safePage - 1) * safeLimit;
 
-  const [
-    items,
-    total,
-  ] = await Promise.all([
+  const [items, total] = await Promise.all([
     Repayment.find(query)
-      .populate(
-        "user",
-        "firstName lastName name email phone"
-      )
+      .populate("user", "firstName lastName name email phone")
       .populate(
         "loan",
-        "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status"
+        "loanNumber principalAmount totalRepayment amountPaid outstandingAmount status",
       )
-      .populate(
-        "loanApplication",
-        "applicationNumber amountRequested status"
-      )
+      .populate("loanApplication", "applicationNumber amountRequested status")
       .populate(
         "repaymentSchedule",
-        "principalAmount totalRepaymentAmount amountPaid amountOutstanding status"
+        "principalAmount totalRepaymentAmount amountPaid amountOutstanding status",
       )
       .populate(
         "repaymentAccount",
-        "accountNumber accountName bankName currency balance status"
+        "accountNumber accountName bankName currency balance status",
       )
       .sort({
         createdAt: -1,
@@ -431,10 +321,7 @@ const findAll = async ({
     total,
     page: safePage,
     limit: safeLimit,
-    totalPages:
-      Math.ceil(
-        total / safeLimit
-      ),
+    totalPages: Math.ceil(total / safeLimit),
   };
 };
 
@@ -442,11 +329,7 @@ const findAll = async ({
 // UPDATE
 // =========================================================
 
-const updateById = async (
-  repaymentId,
-  update,
-  options = {}
-) => {
+const updateById = async (repaymentId, update, options = {}) => {
   return Repayment.findByIdAndUpdate(
     repaymentId,
     {
@@ -456,7 +339,7 @@ const updateById = async (
       returnDocument: "after",
       runValidators: true,
       ...options,
-    }
+    },
   );
 };
 
@@ -468,12 +351,11 @@ const updateStatusIfCurrent = async (
   repaymentId,
   currentStatuses,
   update,
-  options = {}
+  options = {},
 ) => {
   return Repayment.findOneAndUpdate(
     {
       _id: repaymentId,
-
       status: {
         $in: currentStatuses,
       },
@@ -482,10 +364,10 @@ const updateStatusIfCurrent = async (
       $set: update,
     },
     {
+      ...options,
       returnDocument: "after",
       runValidators: true,
-      ...options,
-    }
+    },
   );
 };
 
@@ -501,34 +383,24 @@ const updateStatusIfCurrent = async (
 // different reference values depending on the transaction.
 //
 
-const findByPaymentOrProviderReference = async (
-  reference
-) => {
-  if (
-    !reference ||
-    !String(reference).trim()
-  ) {
+const findByPaymentOrProviderReference = async (reference) => {
+  if (!reference || !String(reference).trim()) {
     return null;
   }
 
-  const normalizedReference =
-    String(reference).trim();
+  const normalizedReference = String(reference).trim();
 
   return Repayment.findOne({
     $or: [
       {
-        paymentReference:
-          normalizedReference,
+        paymentReference: normalizedReference,
       },
       {
-        providerReference:
-          normalizedReference,
+        providerReference: normalizedReference,
       },
     ],
   });
 };
-
-
 
 // =========================================================
 // EXPORT

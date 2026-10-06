@@ -556,7 +556,7 @@ const updateById = async (
       $set: updates,
     },
     {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
       ...options,
     }
@@ -602,7 +602,7 @@ const updateStatusIfCurrent = async (
       },
     },
     {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
       ...options,
     }

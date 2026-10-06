@@ -1,111 +1,107 @@
 const AdminRepaymentService = require("../services/AdminRepaymentService");
 const RepaymentRepository = require("../repositories/RepaymentRepository");
 
-
 const requireAuth = (req, res) => {
-const userId = req.user?._id || req.user?.id;
+  const userId = req.user?._id || req.user?.id;
 
-if (!userId) {
-res.status(401).json({
-success: false,
-message: "Authentication required",
-});
+  if (!userId) {
+    res.status(401).json({
+      success: false,
+      message: "Authentication required",
+    });
 
-```
+    ```
 return null;
-```
+```;
+  }
 
-}
-
-return userId;
+  return userId;
 };
 
 const requireParam = (req, res, name, message) => {
-const value = req.params?.[name];
+  const value = req.params?.[name];
 
-if (!value) {
-res.status(400).json({
-success: false,
-message,
-});
+  if (!value) {
+    res.status(400).json({
+      success: false,
+      message,
+    });
 
-```
+    ```
 return null;
-```
+```;
+  }
 
-}
-
-return value;
+  return value;
 };
 
 /**
 
 * POST /api/admin/loans/:loanId/repayments/collect
   */
-  const collectMandateRepayment = async (req, res, next) => {
+const collectMandateRepayment = async (req, res, next) => {
   try {
-  const adminUserId = requireAuth(req, res);
+    const adminUserId = requireAuth(req, res);
 
-  if (!adminUserId) return;
+    if (!adminUserId) return;
 
-  const loanId = requireParam(
-  req,
-  res,
-  "loanId",
-  "Loan ID is required"
-  );
+    const loanId = requireParam(req, res, "loanId", "Loan ID is required");
 
-  if (!loanId) return;
+    if (!loanId) return;
 
-  const { amount } = req.body;
+    const { amount } = req.body;
 
-  if (amount === undefined || amount === null || amount === "") {
-  return res.status(400).json({
-  success: false,
-  message: "Repayment amount is required",
-  });
-  }
+    if (amount === undefined || amount === null || amount === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Repayment amount is required",
+      });
+    }
 
-  const numericAmount = Number(amount);
+    const numericAmount = Number(amount);
 
-  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-  return res.status(400).json({
-  success: false,
-  message: "Repayment amount must be greater than zero",
-  });
-  }
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Repayment amount must be greater than zero",
+      });
+    }
 
-  const result =
-  await AdminRepaymentService.collectMandateRepayment({
-  loanId,
-  amount: numericAmount,
-  adminUserId,
-  });
+    const result = await AdminRepaymentService.collectMandateRepayment({
+      loanId,
+      amount: numericAmount,
+      adminUserId,
+    });
 
-  return res.status(202).json({
-  success: true,
-  message: "Loan repayment charge initiated successfully",
-  data: result,
-  });
+    const isFailed = result.status === "failed";
+
+    if (isFailed) {
+      return res.status(400).json({
+        success: false,
+        message:
+          result.failureReason ||
+          result.providerResponse?.gatewayResponse ||
+          "Paystack repayment charge failed",
+        data: result,
+      });
+    }
+
+    return res.status(202).json({
+      success: true,
+      message: "Loan repayment charge initiated successfully",
+      data: result,
+    });
   } catch (error) {
-  return next(error);
+    return next(error);
   }
-  };
-
+};
 
 const getRepayments = async (req, res, next) => {
   try {
     const adminUserId = requireAuth(req, res);
     if (!adminUserId) return;
 
-    const {
-      status,
-      repaymentSource,
-      userId,
-      loanId,
-      page,
-      limit,
-    } = req.query;
+    const { status, repaymentSource, userId, loanId, page, limit } = req.query;
 
     const result = await RepaymentRepository.findAll({
       status: status || null,
@@ -126,6 +122,6 @@ const getRepayments = async (req, res, next) => {
 };
 
 module.exports = {
-collectMandateRepayment,
-getRepayments,
+  collectMandateRepayment,
+  getRepayments,
 };
