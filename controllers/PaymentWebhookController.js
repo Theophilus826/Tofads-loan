@@ -51,30 +51,21 @@ const safeCompare = (a, b) => {
 // PAYSTACK SIGNATURE
 // =========================================================
 
-const verifyPaystackSignature = (
-  rawBody,
-  signature
-) => {
-  const secret =
-    process.env.PAYSTACK_SECRET_KEY ||
-    process.env.PAYSTACK_SECRET;
+const verifyPaystackSignature = (rawBody, signature) => {
+  const secret = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_SECRET;
 
   if (!secret) {
-    throw new Error(
-      "Paystack secret key is not configured"
-    );
+    throw new Error("Paystack secret key is not configured");
   }
 
   if (!rawBody) {
     throw new Error(
-      "Raw webhook body is unavailable for signature verification"
+      "Raw webhook body is unavailable for signature verification",
     );
   }
 
   if (!signature) {
-    throw new Error(
-      "Paystack webhook signature is missing"
-    );
+    throw new Error("Paystack webhook signature is missing");
   }
 
   const expectedSignature = crypto
@@ -82,10 +73,7 @@ const verifyPaystackSignature = (
     .update(rawBody)
     .digest("hex");
 
-  return safeCompare(
-    expectedSignature,
-    signature
-  );
+  return safeCompare(expectedSignature, signature);
 };
 
 // =========================================================
@@ -93,23 +81,17 @@ const verifyPaystackSignature = (
 // =========================================================
 
 const verifyInternalLoanWebhook = (secret) => {
-  const configuredSecret =
-    process.env.LOAN_WEBHOOK_SECRET;
+  const configuredSecret = process.env.LOAN_WEBHOOK_SECRET;
 
   if (!configuredSecret) {
-    throw new Error(
-      "LOAN_WEBHOOK_SECRET is not configured"
-    );
+    throw new Error("LOAN_WEBHOOK_SECRET is not configured");
   }
 
   if (!secret) {
     return false;
   }
 
-  return safeCompare(
-    configuredSecret,
-    secret
-  );
+  return safeCompare(configuredSecret, secret);
 };
 
 // =========================================================
@@ -122,7 +104,7 @@ const supportedPaystackEvents = new Set([
   // -------------------------------------------------------
 
   "dedicatedaccount.assign.success",
-   "dedicatedaccount.assign.failed",
+  "dedicatedaccount.assign.failed",
   // -------------------------------------------------------
   // CUSTOMER PAYMENTS
   // -------------------------------------------------------
@@ -168,23 +150,16 @@ const internalSupportedEvents = new Set([
   // Loan DVA assignment
   "dedicatedaccount.assign.success",
   "dedicatedaccount.assign.failed",
+  // Loan mandate repayments
+  "charge.success",
 ]);
 
 // =========================================================
 // EVENT ID
 // =========================================================
 
-const getWebhookEventId = ({
-  req,
-  payload,
-  eventType,
-  eventData,
-}) => {
-  const headerEventId =
-    getHeader(
-      req,
-      "x-webhook-event-id"
-    );
+const getWebhookEventId = ({ req, payload, eventType, eventData }) => {
+  const headerEventId = getHeader(req, "x-webhook-event-id");
 
   if (headerEventId) {
     return String(headerEventId).trim();
@@ -220,18 +195,11 @@ const getWebhookEventId = ({
    * also have its own idempotency protection based on
    * the provider account/customer information.
    */
-  if (
-    eventType ===
-    "dedicatedaccount.assign.success"
-  ) {
+  if (eventType === "dedicatedaccount.assign.success") {
     const customerCode =
-      eventData?.customer?.customer_code ||
-      eventData?.customer_code ||
-      null;
+      eventData?.customer?.customer_code || eventData?.customer_code || null;
 
-    const accountNumber =
-      eventData?.account_number ||
-      null;
+    const accountNumber = eventData?.account_number || null;
 
     if (customerCode || accountNumber) {
       return [
@@ -250,23 +218,16 @@ const getWebhookEventId = ({
 // POST /api/webhooks/webhook
 // =========================================================
 
-const handleWebhook = async (
-  req,
-  res,
-  next
-) => {
+const handleWebhook = async (req, res, next) => {
   try {
     // -----------------------------------------------------
     // PROVIDER
     // -----------------------------------------------------
 
     const provider = String(
-      getHeader(
-        req,
-        "x-payment-provider"
-      ) ||
+      getHeader(req, "x-payment-provider") ||
         process.env.PAYMENT_PROVIDER ||
-        "paystack"
+        "paystack",
     )
       .trim()
       .toLowerCase();
@@ -281,38 +242,20 @@ const handleWebhook = async (
     // INTERNAL PRODUCT → LOAN AUTHENTICATION
     // -----------------------------------------------------
 
-    const internalLoanSecret =
-      getHeader(
-        req,
-        "x-loan-webhook-secret"
-      );
+    const internalLoanSecret = getHeader(req, "x-loan-webhook-secret");
 
     const isInternalLoanWebhook =
-      !!internalLoanSecret &&
-      verifyInternalLoanWebhook(
-        internalLoanSecret
-      );
+      !!internalLoanSecret && verifyInternalLoanWebhook(internalLoanSecret);
 
     // -----------------------------------------------------
     // PAYSTACK SIGNATURE
     // -----------------------------------------------------
 
-    const paystackSignature =
-      getHeader(
-        req,
-        "x-paystack-signature"
-      );
+    const paystackSignature = getHeader(req, "x-paystack-signature");
 
-    const genericSignature =
-      getHeader(
-        req,
-        "x-webhook-signature"
-      );
+    const genericSignature = getHeader(req, "x-webhook-signature");
 
-    const signature =
-      paystackSignature ||
-      genericSignature ||
-      null;
+    const signature = paystackSignature || genericSignature || null;
 
     // -----------------------------------------------------
     // EVENT PAYLOAD
@@ -325,12 +268,7 @@ const handleWebhook = async (
     // -----------------------------------------------------
 
     const eventType = String(
-      getHeader(
-        req,
-        "x-webhook-event-type"
-      ) ||
-        payload.event ||
-        ""
+      getHeader(req, "x-webhook-event-type") || payload.event || "",
     )
       .trim()
       .toLowerCase();
@@ -338,8 +276,7 @@ const handleWebhook = async (
     if (!eventType) {
       return res.status(400).json({
         success: false,
-        message:
-          "Webhook event type is required",
+        message: "Webhook event type is required",
       });
     }
 
@@ -347,8 +284,7 @@ const handleWebhook = async (
     // EVENT DATA
     // -----------------------------------------------------
 
-    const eventData =
-      payload?.data || {};
+    const eventData = payload?.data || {};
 
     // -----------------------------------------------------
     // INTERNAL PRODUCT → LOAN REQUEST
@@ -358,16 +294,13 @@ const handleWebhook = async (
       if (provider !== "paystack") {
         return res.status(400).json({
           success: false,
-          message:
-            "Invalid provider for internal loan webhook",
+          message: "Invalid provider for internal loan webhook",
         });
       }
 
-      if (
-        !internalSupportedEvents.has(
-          eventType
-        )
-      ) {
+      if (!internalSupportedEvents.has(eventType)) {
+        console.log("IGNORING UNSUPPORTED INTERNAL LOAN EVENT:", eventType);
+
         return res.status(200).json({
           success: true,
           received: true,
@@ -376,10 +309,33 @@ const handleWebhook = async (
         });
       }
 
-      console.log(
-        "AUTHENTICATED PRODUCT → LOAN WEBHOOK:",
-        eventType
-      );
+      console.log("AUTHENTICATED PRODUCT → LOAN WEBHOOK:", eventType);
+
+      // -----------------------------------------------
+      // LOAN REPAYMENT
+      // -----------------------------------------------
+
+      if (
+        eventType === "charge.success" &&
+        String(eventData?.reference || "").startsWith("REPAY-LN-")
+      ) {
+        console.log(
+          "🏦 AUTHENTICATED LOAN REPAYMENT WEBHOOK:",
+          eventData.reference,
+        );
+
+        console.log(
+          "💰 REPAYMENT AMOUNT:",
+          Number(eventData.amount || 0) / 100,
+        );
+
+        console.log("💱 REPAYMENT CURRENCY:", eventData.currency || null);
+
+        console.log(
+          "🎯 REPAYMENT PURPOSE:",
+          eventData.metadata?.purpose || null,
+        );
+      }
     } else {
       // ---------------------------------------------------
       // DIRECT PROVIDER WEBHOOK
@@ -389,41 +345,32 @@ const handleWebhook = async (
         if (!rawBody) {
           return res.status(400).json({
             success: false,
-            message:
-              "Raw webhook body is required",
+            message: "Raw webhook body is required",
           });
         }
 
         if (!paystackSignature) {
           return res.status(401).json({
             success: false,
-            message:
-              "Paystack webhook signature is required",
+            message: "Paystack webhook signature is required",
           });
         }
 
-        const validSignature =
-          verifyPaystackSignature(
-            rawBody,
-            paystackSignature
-          );
+        const validSignature = verifyPaystackSignature(
+          rawBody,
+          paystackSignature,
+        );
 
         if (!validSignature) {
-          console.warn(
-            "INVALID PAYSTACK WEBHOOK SIGNATURE"
-          );
+          console.warn("INVALID PAYSTACK WEBHOOK SIGNATURE");
 
           return res.status(401).json({
             success: false,
-            message:
-              "Invalid webhook signature",
+            message: "Invalid webhook signature",
           });
         }
 
-        console.log(
-          "DIRECT PAYSTACK WEBHOOK AUTHENTICATED:",
-          eventType
-        );
+        console.log("DIRECT PAYSTACK WEBHOOK AUTHENTICATED:", eventType);
       }
     }
 
@@ -431,15 +378,8 @@ const handleWebhook = async (
     // IGNORE UNSUPPORTED PAYSTACK EVENTS
     // -----------------------------------------------------
 
-    if (
-      provider === "paystack" &&
-      !supportedPaystackEvents.has(
-        eventType
-      )
-    ) {
-      console.log(
-        `Ignoring unsupported Paystack webhook event: ${eventType}`
-      );
+    if (provider === "paystack" && !supportedPaystackEvents.has(eventType)) {
+      console.log(`Ignoring unsupported Paystack webhook event: ${eventType}`);
 
       return res.status(200).json({
         success: true,
@@ -453,52 +393,34 @@ const handleWebhook = async (
     // EVENT ID
     // -----------------------------------------------------
 
-    const eventId =
-      getWebhookEventId({
-        req,
-        payload,
-        eventType,
-        eventData,
-      });
+    const eventId = getWebhookEventId({
+      req,
+      payload,
+      eventType,
+      eventData,
+    });
 
     // -----------------------------------------------------
     // LOG DVA ASSIGNMENT
     // -----------------------------------------------------
 
-    if (
-      eventType ===
-      "dedicatedaccount.assign.success"
-    ) {
-      console.log(
-        "PAYSTACK DVA ASSIGNMENT SUCCESS:",
-        {
-          customerCode:
-            eventData?.customer
-              ?.customer_code ||
-            eventData?.customer_code ||
-            null,
+    if (eventType === "dedicatedaccount.assign.success") {
+      console.log("PAYSTACK DVA ASSIGNMENT SUCCESS:", {
+        customerCode:
+          eventData?.customer?.customer_code ||
+          eventData?.customer_code ||
+          null,
 
-          accountNumber:
-            eventData?.account_number ||
-            null,
+        accountNumber: eventData?.account_number || null,
 
-          accountName:
-            eventData?.account_name ||
-            null,
+        accountName: eventData?.account_name || null,
 
-          bankName:
-            eventData?.bank?.name ||
-            null,
+        bankName: eventData?.bank?.name || null,
 
-          bankCode:
-            eventData?.bank?.code ||
-            null,
+        bankCode: eventData?.bank?.code || null,
 
-          providerAccountId:
-            eventData?.id ||
-            null,
-        }
-      );
+        providerAccountId: eventData?.id || null,
+      });
     }
 
     // -----------------------------------------------------
@@ -507,59 +429,47 @@ const handleWebhook = async (
 
     if (
       eventType === "charge.success" &&
-      eventData?.authorization
-        ?.channel === "dedicated_nuban"
+      eventData?.authorization?.channel === "dedicated_nuban"
     ) {
-      console.log(
-        "PAYSTACK DVA PAYMENT RECEIVED:",
-        {
-          reference:
-            eventData?.reference ||
-            null,
+      console.log("PAYSTACK DVA PAYMENT RECEIVED:", {
+        reference: eventData?.reference || null,
 
-          amount:
-            eventData?.amount ||
-            null,
+        amount: eventData?.amount || null,
 
-          currency:
-            eventData?.currency ||
-            null,
+        currency: eventData?.currency || null,
 
-          accountNumber:
-            eventData?.authorization
-              ?.receiver_bank_account_number ||
-            eventData
-              ?.authorization
-              ?.account_number ||
-            null,
-        }
-      );
+        accountNumber:
+          eventData?.authorization?.receiver_bank_account_number ||
+          eventData?.authorization?.account_number ||
+          null,
+      });
     }
 
     // -----------------------------------------------------
     // PROCESS WEBHOOK
     // -----------------------------------------------------
 
-    const result =
-      await PaymentWebhookService.processWebhook({
-        provider,
+    console.log("🏦 PROCESSING LOAN WEBHOOK");
+    console.log("EVENT TYPE:", eventType);
+    console.log("EVENT ID:", eventId);
+    console.log("REFERENCE:", eventData?.reference);
+    console.log("TRUSTED INTERNAL:", isInternalLoanWebhook);
 
-        eventId:
-          eventId
-            ? String(eventId).trim()
-            : null,
+    const result = await PaymentWebhookService.processWebhook({
+      provider,
 
-        eventType,
+      eventId: eventId ? String(eventId).trim() : null,
 
-        payload,
+      eventType,
 
-        rawBody,
+      payload,
 
-        signature,
+      rawBody,
 
-        trustedInternalWebhook:
-          isInternalLoanWebhook,
-      });
+      signature,
+
+      trustedInternalWebhook: isInternalLoanWebhook,
+    });
 
     // -----------------------------------------------------
     // ACKNOWLEDGE WEBHOOK
@@ -569,20 +479,14 @@ const handleWebhook = async (
       success: true,
       received: true,
 
-      eventId:
-        eventId
-          ? String(eventId).trim()
-          : null,
+      eventId: eventId ? String(eventId).trim() : null,
 
       eventType,
 
       result: result || null,
     });
   } catch (error) {
-    console.error(
-      "PAYMENT WEBHOOK ERROR:",
-      error
-    );
+    console.error("PAYMENT WEBHOOK ERROR:", error);
 
     return next(error);
   }
