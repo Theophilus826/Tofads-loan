@@ -1865,7 +1865,7 @@ const handleChargeSuccess = async (payload) => {
     // loan is selected.
     // ---------------------------------------------------
 
-    const Loan = require("../models/Loan");
+    const Loan = require("../model/Loan");
 
     const loan = await Loan.findOne({
       user: repaymentAccount.user,
