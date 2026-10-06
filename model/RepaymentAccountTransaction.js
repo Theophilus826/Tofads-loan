@@ -1,270 +1,253 @@
-
 const mongoose = require("mongoose");
 
-const repaymentAccountTransactionSchema =
-  new mongoose.Schema(
-    {
-      // =====================================================
-      // REPAYMENT ACCOUNT
-      // =====================================================
+const repaymentAccountTransactionSchema = new mongoose.Schema(
+  {
+    // =====================================================
+    // REPAYMENT ACCOUNT
+    // =====================================================
 
-      repaymentAccount: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "RepaymentAccount",
-        required: true,
-        index: true,
-      },
-
-      // =====================================================
-      // CUSTOMER
-      // =====================================================
-
-      user: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        required: true,
-        index: true,
-      },
-
-      // =====================================================
-      // TRANSACTION TYPE
-      // =====================================================
-
-      type: {
-        type: String,
-        enum: [
-          "credit",
-          "debit",
-          "reversal",
-          "refund",
-        ],
-        required: true,
-        index: true,
-      },
-
-      // =====================================================
-      // TRANSACTION STATUS
-      // =====================================================
-
-      status: {
-        type: String,
-        enum: [
-          "pending",
-          "successful",
-          "failed",
-          "reversed",
-        ],
-        default: "successful",
-        required: true,
-        index: true,
-      },
-
-      // =====================================================
-      // AMOUNT
-      // =====================================================
-
-      amount: {
-        type: Number,
-        required: true,
-        min: 0.01,
-      },
-
-      currency: {
-        type: String,
-        default: "NGN",
-        uppercase: true,
-        trim: true,
-        required: true,
-      },
-
-      // =====================================================
-      // BALANCE SNAPSHOT
-      // =====================================================
-
-      balanceBefore: {
-        type: Number,
-        required: true,
-        min: 0,
-      },
-
-      balanceAfter: {
-        type: Number,
-        required: true,
-        min: 0,
-      },
-
-      // =====================================================
-      // TRANSACTION PURPOSE
-      // =====================================================
-
-      purpose: {
-        type: String,
-        enum: [
-          "account_funding",
-          "loan_repayment",
-          "repayment_reversal",
-          "refund",
-          "manual_adjustment",
-        ],
-        required: true,
-        index: true,
-      },
-
-      // =====================================================
-      // LOAN
-      // =====================================================
-
-      loan: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Loan",
-        default: null,
-        index: true,
-      },
-
-      // =====================================================
-      // LOAN APPLICATION
-      // =====================================================
-
-      loanApplication: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "LoanApplication",
-        default: null,
-        index: true,
-      },
-
-      // =====================================================
-      // REPAYMENT SCHEDULE
-      // =====================================================
-
-      repaymentSchedule: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "RepaymentSchedule",
-        default: null,
-        index: true,
-      },
-
-      // =====================================================
-      // REPAYMENT
-      // =====================================================
-
-      repayment: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Repayment",
-        default: null,
-        index: true,
-      },
-
-      // =====================================================
-      // PAYMENT PROVIDER
-      // =====================================================
-
-      provider: {
-        type: String,
-        default: null,
-        trim: true,
-        lowercase: true,
-        index: true,
-      },
-
-      // =====================================================
-      // PROVIDER REFERENCE
-      // =====================================================
-
-      providerReference: {
-        type: String,
-        default: null,
-        trim: true,
-        index: true,
-      },
-
-      // =====================================================
-      // PROVIDER DATA
-      // =====================================================
-
-      providerData: {
-        type: mongoose.Schema.Types.Mixed,
-        default: null,
-      },
-
-      // =====================================================
-      // DESCRIPTION
-      // =====================================================
-
-      description: {
-        type: String,
-        default: null,
-        trim: true,
-        maxlength: 500,
-      },
-
-      // =====================================================
-      // FAILURE INFORMATION
-      // =====================================================
-
-      failureReason: {
-        type: String,
-        default: null,
-        trim: true,
-        maxlength: 500,
-      },
-
-      // =====================================================
-      // REVERSAL INFORMATION
-      // =====================================================
-
-      reversalReason: {
-        type: String,
-        default: null,
-        trim: true,
-        maxlength: 500,
-      },
-
-      // =====================================================
-      // STATUS DATES
-      // =====================================================
-
-      processedAt: {
-        type: Date,
-        default: null,
-        index: true,
-      },
-
-      failedAt: {
-        type: Date,
-        default: null,
-      },
-
-      reversedAt: {
-        type: Date,
-        default: null,
-      },
-
-      // =====================================================
-      // INITIATED BY
-      // =====================================================
-
-      initiatedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        default: null,
-        index: true,
-      },
-
-      initiatedByRole: {
-        type: String,
-        enum: [
-          "customer",
-          "admin",
-          "finance",
-          "system",
-        ],
-        default: null,
-      },
+    repaymentAccount: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "RepaymentAccount",
+      required: true,
+      index: true,
     },
-    {
-      timestamps: true,
-    }
-  );
+
+    // =====================================================
+    // CUSTOMER
+    // =====================================================
+
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    // =====================================================
+    // TRANSACTION TYPE
+    // =====================================================
+
+    type: {
+      type: String,
+      enum: ["credit", "debit", "reversal", "refund"],
+      required: true,
+      index: true,
+    },
+
+    // =====================================================
+    // TRANSACTION STATUS
+    // =====================================================
+
+    status: {
+      type: String,
+      enum: ["pending", "successful", "failed", "reversed"],
+      default: "successful",
+      required: true,
+      index: true,
+    },
+
+    // =====================================================
+    // AMOUNT
+    // =====================================================
+
+    amount: {
+      type: Number,
+      required: true,
+      min: 0.01,
+    },
+
+    currency: {
+      type: String,
+      default: "NGN",
+      uppercase: true,
+      trim: true,
+      required: true,
+    },
+
+    // =====================================================
+    // BALANCE SNAPSHOT
+    // =====================================================
+
+    balanceBefore: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    balanceAfter: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    // =====================================================
+    // TRANSACTION PURPOSE
+    // =====================================================
+
+    purpose: {
+      type: String,
+      enum: [
+        "account_funding",
+        "loan_repayment",
+        "repayment_reversal",
+        "refund",
+        "manual_adjustment",
+      ],
+      required: true,
+      index: true,
+    },
+
+    // =====================================================
+    // LOAN
+    // =====================================================
+
+    loan: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Loan",
+      default: null,
+      index: true,
+    },
+
+    // =====================================================
+    // LOAN APPLICATION
+    // =====================================================
+
+    loanApplication: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "LoanApplication",
+      default: null,
+      index: true,
+    },
+
+    // =====================================================
+    // REPAYMENT SCHEDULE
+    // =====================================================
+
+    repaymentSchedule: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "RepaymentSchedule",
+      default: null,
+      index: true,
+    },
+
+    // =====================================================
+    // REPAYMENT
+    // =====================================================
+
+    repayment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Repayment",
+      default: null,
+      index: true,
+    },
+
+    // =====================================================
+    // PAYMENT PROVIDER
+    // =====================================================
+
+    provider: {
+      type: String,
+      default: null,
+      trim: true,
+      lowercase: true,
+      index: true,
+    },
+
+    // =====================================================
+    // PROVIDER REFERENCE
+    // =====================================================
+
+    providerReference: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+    },
+
+    // =====================================================
+    // PROVIDER DATA
+    // =====================================================
+
+    providerData: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    // =====================================================
+    // DESCRIPTION
+    // =====================================================
+
+    description: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 500,
+    },
+
+    // =====================================================
+    // FAILURE INFORMATION
+    // =====================================================
+
+    failureReason: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 500,
+    },
+
+    // =====================================================
+    // REVERSAL INFORMATION
+    // =====================================================
+
+    reversalReason: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 500,
+    },
+
+    // =====================================================
+    // STATUS DATES
+    // =====================================================
+
+    processedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
+    failedAt: {
+      type: Date,
+      default: null,
+    },
+
+    reversedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // =====================================================
+    // INITIATED BY
+    // =====================================================
+
+    initiatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+
+    initiatedByRole: {
+      type: String,
+      enum: ["customer", "admin", "finance", "system"],
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+  },
+);
 
 // =========================================================
 // INDEXES
@@ -355,204 +338,130 @@ repaymentAccountTransactionSchema.index(
   {
     unique: true,
     sparse: true,
-  }
+  },
 );
 
 // =========================================================
 // VALIDATION
 // =========================================================
 
-repaymentAccountTransactionSchema.pre(
-  "validate",
-  function (next) {
-    // =====================================================
-    // AMOUNT
-    // =====================================================
+repaymentAccountTransactionSchema.pre("validate", function () {
+  // =====================================================
+  // AMOUNT
+  // =====================================================
 
-    const numericAmount = Number(this.amount);
+  const numericAmount = Number(this.amount);
 
-    if (
-      !Number.isFinite(numericAmount) ||
-      numericAmount <= 0
-    ) {
-      return next(
-        new Error(
-          "Transaction amount must be greater than zero"
-        )
-      );
-    }
-
-    // =====================================================
-    // BALANCE BEFORE
-    // =====================================================
-
-    const numericBalanceBefore =
-      Number(this.balanceBefore);
-
-    if (
-      !Number.isFinite(numericBalanceBefore) ||
-      numericBalanceBefore < 0
-    ) {
-      return next(
-        new Error("Invalid balanceBefore")
-      );
-    }
-
-    // =====================================================
-    // BALANCE AFTER
-    // =====================================================
-
-    const numericBalanceAfter =
-      Number(this.balanceAfter);
-
-    if (
-      !Number.isFinite(numericBalanceAfter) ||
-      numericBalanceAfter < 0
-    ) {
-      return next(
-        new Error("Invalid balanceAfter")
-      );
-    }
-
-    // =====================================================
-    // ACCOUNT FUNDING
-    // =====================================================
-    //
-    // Account funding must:
-    //
-    // - be a credit
-    // - not reference a repayment
-    // - not reference a loan repayment
-    //
-    // =====================================================
-
-    if (this.purpose === "account_funding") {
-      if (this.type !== "credit") {
-        return next(
-          new Error(
-            "Account funding must be a credit transaction"
-          )
-        );
-      }
-
-      if (this.repayment) {
-        return next(
-          new Error(
-            "Account funding cannot be linked to a repayment"
-          )
-        );
-      }
-    }
-
-    // =====================================================
-    // LOAN REPAYMENT
-    // =====================================================
-    //
-    // Loan repayment must:
-    //
-    // - be a debit
-    // - reference a repayment
-    //
-    // =====================================================
-
-    if (this.purpose === "loan_repayment") {
-      if (this.type !== "debit") {
-        return next(
-          new Error(
-            "Loan repayment must be a debit transaction"
-          )
-        );
-      }
-
-      if (!this.repayment) {
-        return next(
-          new Error(
-            "Loan repayment transaction requires a repayment"
-          )
-        );
-      }
-    }
-
-    // =====================================================
-    // REPAYMENT REVERSAL
-    // =====================================================
-
-    if (this.purpose === "repayment_reversal") {
-      if (this.type !== "reversal") {
-        return next(
-          new Error(
-            "Repayment reversal must use reversal transaction type"
-          )
-        );
-      }
-
-      if (!this.repayment) {
-        return next(
-          new Error(
-            "Repayment reversal requires a repayment"
-          )
-        );
-      }
-    }
-
-    // =====================================================
-    // REFUND
-    // =====================================================
-
-    if (this.purpose === "refund") {
-      if (!this.repayment) {
-        return next(
-          new Error(
-            "Refund transaction requires a repayment"
-          )
-        );
-      }
-
-      if (
-        this.type !== "refund" &&
-        this.type !== "credit"
-      ) {
-        return next(
-          new Error(
-            "Invalid transaction type for refund"
-          )
-        );
-      }
-    }
-
-    // =====================================================
-    // SUCCESSFUL TRANSACTION
-    // =====================================================
-
-    if (this.status === "successful") {
-      if (!this.processedAt) {
-        this.processedAt = new Date();
-      }
-    }
-
-    // =====================================================
-    // FAILED TRANSACTION
-    // =====================================================
-
-    if (this.status === "failed") {
-      if (!this.failedAt) {
-        this.failedAt = new Date();
-      }
-    }
-
-    // =====================================================
-    // REVERSED TRANSACTION
-    // =====================================================
-
-    if (this.status === "reversed") {
-      if (!this.reversedAt) {
-        this.reversedAt = new Date();
-      }
-    }
-
-    next();
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    throw new Error("Transaction amount must be greater than zero");
   }
-);
+
+  // =====================================================
+  // BALANCE BEFORE
+  // =====================================================
+
+  const numericBalanceBefore = Number(this.balanceBefore);
+
+  if (!Number.isFinite(numericBalanceBefore) || numericBalanceBefore < 0) {
+    throw new Error("Invalid balanceBefore");
+  }
+
+  // =====================================================
+  // BALANCE AFTER
+  // =====================================================
+
+  const numericBalanceAfter = Number(this.balanceAfter);
+
+  if (!Number.isFinite(numericBalanceAfter) || numericBalanceAfter < 0) {
+    throw new Error("Invalid balanceAfter");
+  }
+
+  // =====================================================
+  // ACCOUNT FUNDING
+  // =====================================================
+
+  if (this.purpose === "account_funding") {
+    if (this.type !== "credit") {
+      throw new Error("Account funding must be a credit transaction");
+    }
+
+    if (this.repayment) {
+      throw new Error("Account funding cannot be linked to a repayment");
+    }
+  }
+
+  // =====================================================
+  // LOAN REPAYMENT
+  // =====================================================
+
+  if (this.purpose === "loan_repayment") {
+    if (this.type !== "debit") {
+      throw new Error("Loan repayment must be a debit transaction");
+    }
+
+    if (!this.repayment) {
+      throw new Error("Loan repayment transaction requires a repayment");
+    }
+  }
+
+  // =====================================================
+  // REPAYMENT REVERSAL
+  // =====================================================
+
+  if (this.purpose === "repayment_reversal") {
+    if (this.type !== "reversal") {
+      throw new Error("Repayment reversal must use reversal transaction type");
+    }
+
+    if (!this.repayment) {
+      throw new Error("Repayment reversal requires a repayment");
+    }
+  }
+
+  // =====================================================
+  // REFUND
+  // =====================================================
+
+  if (this.purpose === "refund") {
+    if (!this.repayment) {
+      throw new Error("Refund transaction requires a repayment");
+    }
+
+    if (this.type !== "refund" && this.type !== "credit") {
+      throw new Error("Invalid transaction type for refund");
+    }
+  }
+
+  // =====================================================
+  // SUCCESSFUL TRANSACTION
+  // =====================================================
+
+  if (this.status === "successful") {
+    if (!this.processedAt) {
+      this.processedAt = new Date();
+    }
+  }
+
+  // =====================================================
+  // FAILED TRANSACTION
+  // =====================================================
+
+  if (this.status === "failed") {
+    if (!this.failedAt) {
+      this.failedAt = new Date();
+    }
+  }
+
+  // =====================================================
+  // REVERSED TRANSACTION
+  // =====================================================
+
+  if (this.status === "reversed") {
+    if (!this.reversedAt) {
+      this.reversedAt = new Date();
+    }
+  }
+});
 
 // =========================================================
 // MODEL
@@ -562,13 +471,11 @@ const RepaymentAccountTransaction =
   mongoose.models.RepaymentAccountTransaction ||
   mongoose.model(
     "RepaymentAccountTransaction",
-    repaymentAccountTransactionSchema
+    repaymentAccountTransactionSchema,
   );
 
 // =========================================================
 // EXPORT
 // =========================================================
 
-module.exports =
-  RepaymentAccountTransaction;
-
+module.exports = RepaymentAccountTransaction;
