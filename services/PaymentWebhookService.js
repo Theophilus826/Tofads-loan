@@ -1839,7 +1839,7 @@ const handleChargeSuccess = async (payload) => {
 
         amount: amountInNaira,
 
-        providerReference: repaymentProviderReference,
+        providerReference,
 
         providerData: payload?.data || payload,
       });
@@ -2002,40 +2002,33 @@ const handleChargeSuccess = async (payload) => {
       providerReference,
     });
 
-    const repaymentProviderReference =
-  `dva_repayment_${String(providerReference).trim()}`;
+    const repaymentProviderReference = `dva_repayment_${String(providerReference).trim()}`;
 
-const repaymentResult = await RepaymentService.repayFromAccount(
-  repaymentAccount.user,
-  {
-    repaymentScheduleId: loan.repaymentSchedule,
-    amount: repaymentAmount,
-    provider: "paystack",
-    providerReference: repaymentProviderReference,
-    providerData: {
-      ...(payload?.data || payload),
-      source: "paystack_dva",
-      originalProviderReference: providerReference,
-    },
-    initiatedByRole: "system",
-  },
-);
-
+    const repaymentResult = await RepaymentService.repayFromAccount(
+      repaymentAccount.user,
+      {
+        repaymentScheduleId: loan.repaymentSchedule,
+        amount: repaymentAmount,
+        provider: "paystack",
+        providerReference: repaymentProviderReference,
+        providerData: {
+          ...(payload?.data || payload),
+          source: "paystack_dva",
+          originalProviderReference: providerReference,
+        },
+        initiatedByRole: "system",
+      },
+    );
     console.log("✅ DVA AUTOMATIC REPAYMENT COMPLETED:", {
       loanId: loan._id,
-
       userId: repaymentAccount.user,
-
       accountNumber,
-
       amount: repaymentAmount,
-
-      providerReference,
-
+      providerReference: repaymentProviderReference,
+      originalProviderReference: providerReference,
       repaymentId:
         repaymentResult?.repayment?._id || repaymentResult?._id || null,
     });
-
     // ---------------------------------------------------
     // 7. RETURN COMPLETE RESULT
     // ---------------------------------------------------
