@@ -1839,7 +1839,7 @@ const handleChargeSuccess = async (payload) => {
 
         amount: amountInNaira,
 
-        providerReference,
+        providerReference: repaymentProviderReference,
 
         providerData: payload?.data || payload,
       });
@@ -2002,17 +2002,24 @@ const handleChargeSuccess = async (payload) => {
       providerReference,
     });
 
-    const repaymentResult = await RepaymentService.repayFromAccount(
-      repaymentAccount.user,
-      {
-        repaymentScheduleId: loan.repaymentSchedule,
-        amount: repaymentAmount,
-        provider: "paystack",
-        providerReference,
-        providerData: payload?.data || payload,
-        initiatedByRole: "system",
-      },
-    );
+    const repaymentProviderReference =
+  `dva_repayment_${String(providerReference).trim()}`;
+
+const repaymentResult = await RepaymentService.repayFromAccount(
+  repaymentAccount.user,
+  {
+    repaymentScheduleId: loan.repaymentSchedule,
+    amount: repaymentAmount,
+    provider: "paystack",
+    providerReference: repaymentProviderReference,
+    providerData: {
+      ...(payload?.data || payload),
+      source: "paystack_dva",
+      originalProviderReference: providerReference,
+    },
+    initiatedByRole: "system",
+  },
+);
 
     console.log("✅ DVA AUTOMATIC REPAYMENT COMPLETED:", {
       loanId: loan._id,
