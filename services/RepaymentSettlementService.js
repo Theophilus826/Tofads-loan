@@ -4,6 +4,7 @@ const Loan = require("../model/Loan");
 const Repayment = require("../model/RepaymentModel");
 const RepaymentSchedule = require("../model/RepaymentScheduleModel");
 
+const LoanApplicationService = require("./LoanApplicationService");
 class RepaymentSettlementService {
   /**
    * =========================================================
@@ -57,27 +58,18 @@ class RepaymentSettlementService {
     // =======================================================
 
     if (!repaymentId) {
-      throw new Error(
-        "Repayment ID is required"
-      );
+      throw new Error("Repayment ID is required");
     }
 
-    if (
-      !mongoose.Types.ObjectId.isValid(
-        repaymentId
-      )
-    ) {
-      throw new Error(
-        "Invalid repayment ID"
-      );
+    if (!mongoose.Types.ObjectId.isValid(repaymentId)) {
+      throw new Error("Invalid repayment ID");
     }
 
     // =======================================================
     // START SESSION
     // =======================================================
 
-    const session =
-      await mongoose.startSession();
+    const session = await mongoose.startSession();
 
     try {
       session.startTransaction();
@@ -86,49 +78,33 @@ class RepaymentSettlementService {
       // LOAD REPAYMENT
       // =====================================================
 
-      const repayment =
-        await Repayment.findById(
-          repaymentId
-        ).session(session);
+      const repayment = await Repayment.findById(repaymentId).session(session);
 
       if (!repayment) {
-        throw new Error(
-          "Repayment not found"
-        );
+        throw new Error("Repayment not found");
       }
 
       // =====================================================
       // IDEMPOTENCY
       // =====================================================
 
-      if (
-        repayment.status ===
-        "successful"
-      ) {
+      if (repayment.status === "successful") {
         await session.commitTransaction();
 
         return {
           alreadySettled: true,
 
-          repaymentId:
-            repayment._id,
+          repaymentId: repayment._id,
 
-          loanId:
-            repayment.loan,
+          loanId: repayment.loan,
 
-          repaymentScheduleId:
-            repayment.repaymentSchedule,
+          repaymentScheduleId: repayment.repaymentSchedule,
 
-          status:
-            repayment.status,
+          status: repayment.status,
 
-          amount:
-            Number(
-              repayment.amount || 0
-            ),
+          amount: Number(repayment.amount || 0),
 
-          allocation:
-            repayment.allocation || [],
+          allocation: repayment.allocation || [],
         };
       }
 
@@ -136,16 +112,9 @@ class RepaymentSettlementService {
       // ONLY EXPECTED STATES CAN BE SETTLED
       // =====================================================
 
-      if (
-        ![
-          "pending",
-          "processing",
-        ].includes(
-          repayment.status
-        )
-      ) {
+      if (!["pending", "processing"].includes(repayment.status)) {
         throw new Error(
-          `Repayment cannot be settled from status "${repayment.status}"`
+          `Repayment cannot be settled from status "${repayment.status}"`,
         );
       }
 
@@ -154,145 +123,88 @@ class RepaymentSettlementService {
       // =====================================================
 
       if (!repayment.loan) {
-        throw new Error(
-          "Repayment is not attached to a loan"
-        );
+        throw new Error("Repayment is not attached to a loan");
       }
 
       if (!repayment.repaymentSchedule) {
-        throw new Error(
-          "Repayment is not attached to a repayment schedule"
-        );
+        throw new Error("Repayment is not attached to a repayment schedule");
       }
 
       // =====================================================
       // REPAYMENT AMOUNT
       // =====================================================
 
-      const amount =
-        Number(
-          repayment.amount
-        );
+      const amount = Number(repayment.amount);
 
-      if (
-        !Number.isFinite(amount) ||
-        amount <= 0
-      ) {
-        throw new Error(
-          "Invalid repayment amount"
-        );
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Invalid repayment amount");
       }
 
       // =====================================================
       // LOAD LOAN
       // =====================================================
 
-      const loan =
-        await Loan.findById(
-          repayment.loan
-        ).session(session);
+      const loan = await Loan.findById(repayment.loan).session(session);
 
       if (!loan) {
-        throw new Error(
-          "Loan not found for repayment"
-        );
+        throw new Error("Loan not found for repayment");
       }
 
       // =====================================================
       // LOAD REPAYMENT SCHEDULE
       // =====================================================
 
-      const schedule =
-        await RepaymentSchedule.findById(
-          repayment.repaymentSchedule
-        ).session(session);
+      const schedule = await RepaymentSchedule.findById(
+        repayment.repaymentSchedule,
+      ).session(session);
 
       if (!schedule) {
-        throw new Error(
-          "Repayment schedule not found"
-        );
+        throw new Error("Repayment schedule not found");
       }
 
       // =====================================================
       // RELATIONSHIP VALIDATION
       // =====================================================
 
-      if (
-        String(schedule.loan) !==
-        String(loan._id)
-      ) {
-        throw new Error(
-          "Repayment schedule does not belong to this loan"
-        );
+      if (String(schedule.loan) !== String(loan._id)) {
+        throw new Error("Repayment schedule does not belong to this loan");
       }
 
-      if (
-        String(repayment.user) !==
-        String(loan.user)
-      ) {
-        throw new Error(
-          "Repayment does not belong to the loan borrower"
-        );
+      if (String(repayment.user) !== String(loan.user)) {
+        throw new Error("Repayment does not belong to the loan borrower");
       }
 
       if (
         repayment.loanApplication &&
         loan.loanApplication &&
-        String(
-          repayment.loanApplication
-        ) !==
-          String(
-            loan.loanApplication
-          )
+        String(repayment.loanApplication) !== String(loan.loanApplication)
       ) {
-        throw new Error(
-          "Repayment does not belong to this loan application"
-        );
+        throw new Error("Repayment does not belong to this loan application");
       }
 
       // =====================================================
       // LOAN OUTSTANDING
       // =====================================================
 
-      const outstandingAmount =
-        Number(
-          loan.outstandingAmount || 0
-        );
+      const outstandingAmount = Number(loan.outstandingAmount || 0);
 
-      const currentLoanAmountPaid =
-        Number(
-          loan.amountPaid || 0
-        );
+      const currentLoanAmountPaid = Number(loan.amountPaid || 0);
 
-      if (
-        !Number.isFinite(
-          outstandingAmount
-        ) ||
-        outstandingAmount < 0
-      ) {
-        throw new Error(
-          "Invalid loan outstanding amount"
-        );
+      if (!Number.isFinite(outstandingAmount) || outstandingAmount < 0) {
+        throw new Error("Invalid loan outstanding amount");
       }
 
-      if (
-        outstandingAmount <= 0
-      ) {
-        throw new Error(
-          "Loan has no outstanding balance"
-        );
+      if (outstandingAmount <= 0) {
+        throw new Error("Loan has no outstanding balance");
       }
 
       // =====================================================
       // PREVENT OVERPAYMENT
       // =====================================================
 
-      if (
-        amount >
-        outstandingAmount + 0.01
-      ) {
+      if (amount > outstandingAmount + 0.01) {
         throw new Error(
-          `Repayment amount ${amount} exceeds loan outstanding balance ${outstandingAmount}`
+          `Repayment amount ${amount} exceeds loan outstanding balance ${outstandingAmount}`,
         );
       }
 
@@ -300,41 +212,23 @@ class RepaymentSettlementService {
       // SCHEDULE OUTSTANDING
       // =====================================================
 
-      const scheduleOutstanding =
-        Number(
-          schedule.amountOutstanding ||
-            0
-        );
+      const scheduleOutstanding = Number(schedule.amountOutstanding || 0);
 
-      if (
-        !Number.isFinite(
-          scheduleOutstanding
-        ) ||
-        scheduleOutstanding < 0
-      ) {
-        throw new Error(
-          "Invalid repayment schedule outstanding amount"
-        );
+      if (!Number.isFinite(scheduleOutstanding) || scheduleOutstanding < 0) {
+        throw new Error("Invalid repayment schedule outstanding amount");
       }
 
-      if (
-        scheduleOutstanding <= 0
-      ) {
-        throw new Error(
-          "Repayment schedule has no outstanding balance"
-        );
+      if (scheduleOutstanding <= 0) {
+        throw new Error("Repayment schedule has no outstanding balance");
       }
 
       // =====================================================
       // PREVENT SCHEDULE OVERPAYMENT
       // =====================================================
 
-      if (
-        amount >
-        scheduleOutstanding + 0.01
-      ) {
+      if (amount > scheduleOutstanding + 0.01) {
         throw new Error(
-          `Repayment amount ${amount} exceeds schedule outstanding balance ${scheduleOutstanding}`
+          `Repayment amount ${amount} exceeds schedule outstanding balance ${scheduleOutstanding}`,
         );
       }
 
@@ -356,46 +250,25 @@ class RepaymentSettlementService {
       //
       // =====================================================
 
-      let remainingAmount =
-        Number(
-          amount.toFixed(2)
-        );
+      let remainingAmount = Number(amount.toFixed(2));
 
       const allocation = [];
 
-      const installments =
-        Array.isArray(
-          schedule.installments
-        )
-          ? schedule.installments
-          : [];
+      const installments = Array.isArray(schedule.installments)
+        ? schedule.installments
+        : [];
 
-      if (
-        installments.length === 0
-      ) {
-        throw new Error(
-          "Repayment schedule has no installments"
-        );
+      if (installments.length === 0) {
+        throw new Error("Repayment schedule has no installments");
       }
 
       // Ensure deterministic order.
       installments.sort(
-        (a, b) =>
-          Number(
-            a.installmentNumber
-          ) -
-          Number(
-            b.installmentNumber
-          )
+        (a, b) => Number(a.installmentNumber) - Number(b.installmentNumber),
       );
 
-      for (
-        const installment of installments
-      ) {
-        if (
-          remainingAmount <=
-          0.01
-        ) {
+      for (const installment of installments) {
+        if (remainingAmount <= 0.01) {
           break;
         }
 
@@ -403,65 +276,32 @@ class RepaymentSettlementService {
         // Skip fully paid installments
         // ---------------------------------------------------
 
-        if (
-          installment.status ===
-            "paid" ||
-          installment.status ===
-            "waived"
-        ) {
+        if (installment.status === "paid" || installment.status === "waived") {
           continue;
         }
 
-        const totalAmount =
-          Number(
-            installment.totalAmount ||
-              0
-          );
+        const totalAmount = Number(installment.totalAmount || 0);
 
-        const currentPaid =
-          Number(
-            installment.paidAmount ||
-              0
-          );
+        const currentPaid = Number(installment.paidAmount || 0);
 
-        let currentRemaining =
-          Number(
-            installment.remainingAmount
-          );
+        let currentRemaining = Number(installment.remainingAmount);
 
         // ---------------------------------------------------
         // Repair invalid/missing remainingAmount safely
         // ---------------------------------------------------
 
-        if (
-          !Number.isFinite(
-            currentRemaining
-          )
-        ) {
-          currentRemaining =
-            Math.max(
-              totalAmount -
-                currentPaid,
-              0
-            );
+        if (!Number.isFinite(currentRemaining)) {
+          currentRemaining = Math.max(totalAmount - currentPaid, 0);
         }
 
-        if (
-          currentRemaining <=
-          0.01
-        ) {
-          installment.remainingAmount =
-            0;
+        if (currentRemaining <= 0.01) {
+          installment.remainingAmount = 0;
 
-          installment.paidAmount =
-            totalAmount;
+          installment.paidAmount = totalAmount;
 
-          installment.status =
-            "paid";
+          installment.status = "paid";
 
-          installment.paidAt =
-            installment.paidAt ||
-            new Date();
+          installment.paidAt = installment.paidAt || new Date();
 
           continue;
         }
@@ -470,16 +310,9 @@ class RepaymentSettlementService {
         // Calculate amount to apply
         // ---------------------------------------------------
 
-        const amountToApply =
-          Math.min(
-            remainingAmount,
-            currentRemaining
-          );
+        const amountToApply = Math.min(remainingAmount, currentRemaining);
 
-        if (
-          amountToApply <=
-          0
-        ) {
+        if (amountToApply <= 0) {
           continue;
         }
 
@@ -487,51 +320,30 @@ class RepaymentSettlementService {
         // Update installment paid amount
         // ---------------------------------------------------
 
-        const newPaidAmount =
-          Number(
-            (
-              currentPaid +
-              amountToApply
-            ).toFixed(2)
-          );
+        const newPaidAmount = Number((currentPaid + amountToApply).toFixed(2));
 
-        const newRemainingAmount =
-          Number(
-            Math.max(
-              totalAmount -
-                newPaidAmount,
-              0
-            ).toFixed(2)
-          );
+        const newRemainingAmount = Number(
+          Math.max(totalAmount - newPaidAmount, 0).toFixed(2),
+        );
 
-        installment.paidAmount =
-          newPaidAmount;
+        installment.paidAmount = newPaidAmount;
 
-        installment.remainingAmount =
-          newRemainingAmount;
+        installment.remainingAmount = newRemainingAmount;
 
         // ---------------------------------------------------
         // Update installment status
         // ---------------------------------------------------
 
-        if (
-          newRemainingAmount <=
-          0.01
-        ) {
-          installment.paidAmount =
-            totalAmount;
+        if (newRemainingAmount <= 0.01) {
+          installment.paidAmount = totalAmount;
 
-          installment.remainingAmount =
-            0;
+          installment.remainingAmount = 0;
 
-          installment.status =
-            "paid";
+          installment.status = "paid";
 
-          installment.paidAt =
-            new Date();
+          installment.paidAt = new Date();
         } else {
-          installment.status =
-            "partially_paid";
+          installment.status = "partially_paid";
         }
 
         // ---------------------------------------------------
@@ -539,43 +351,27 @@ class RepaymentSettlementService {
         // ---------------------------------------------------
 
         allocation.push({
-          installmentId:
-            installment._id,
+          installmentId: installment._id,
 
-          installmentNumber:
-            installment.installmentNumber,
+          installmentNumber: installment.installmentNumber,
 
-          amount:
-            Number(
-              amountToApply.toFixed(
-                2
-              )
-            ),
+          amount: Number(amountToApply.toFixed(2)),
         });
 
         // ---------------------------------------------------
         // Reduce repayment remainder
         // ---------------------------------------------------
 
-        remainingAmount =
-          Number(
-            (
-              remainingAmount -
-              amountToApply
-            ).toFixed(2)
-          );
+        remainingAmount = Number((remainingAmount - amountToApply).toFixed(2));
       }
 
       // =====================================================
       // ENSURE ENTIRE PAYMENT WAS ALLOCATED
       // =====================================================
 
-      if (
-        remainingAmount >
-        0.01
-      ) {
+      if (remainingAmount > 0.01) {
         throw new Error(
-          `Unable to allocate the complete repayment. Unallocated amount: ${remainingAmount}`
+          `Unable to allocate the complete repayment. Unallocated amount: ${remainingAmount}`,
         );
       }
 
@@ -583,69 +379,39 @@ class RepaymentSettlementService {
       // ALLOCATION TOTAL
       // =====================================================
 
-      const allocatedAmount =
-        Number(
-          allocation
-            .reduce(
-              (
-                total,
-                item
-              ) =>
-                total +
-                Number(
-                  item.amount || 0
-                ),
-              0
-            )
-            .toFixed(2)
-        );
+      const allocatedAmount = Number(
+        allocation
+          .reduce((total, item) => total + Number(item.amount || 0), 0)
+          .toFixed(2),
+      );
 
-      const unallocatedAmount =
-        Number(
-          Math.max(
-            amount -
-              allocatedAmount,
-            0
-          ).toFixed(2)
-        );
+      const unallocatedAmount = Number(
+        Math.max(amount - allocatedAmount, 0).toFixed(2),
+      );
 
       // =====================================================
       // UPDATE REPAYMENT
       // =====================================================
 
-      repayment.status =
-        "successful";
+      repayment.status = "successful";
 
-      repayment.provider =
-        repayment.provider ||
-        "paystack";
+      repayment.provider = repayment.provider || "paystack";
 
-      if (
-        providerReference
-      ) {
-        repayment.providerReference =
-          providerReference;
+      if (providerReference) {
+        repayment.providerReference = providerReference;
       }
 
-      if (
-        providerData
-      ) {
-        repayment.providerData =
-          providerData;
+      if (providerData) {
+        repayment.providerData = providerData;
       }
 
-      repayment.paidAt =
-        repayment.paidAt ||
-        new Date();
+      repayment.paidAt = repayment.paidAt || new Date();
 
-      repayment.allocation =
-        allocation;
+      repayment.allocation = allocation;
 
-      repayment.allocatedAmount =
-        allocatedAmount;
+      repayment.allocatedAmount = allocatedAmount;
 
-      repayment.unallocatedAmount =
-        unallocatedAmount;
+      repayment.unallocatedAmount = unallocatedAmount;
 
       await repayment.save({
         session,
@@ -655,64 +421,36 @@ class RepaymentSettlementService {
       // UPDATE LOAN
       // =====================================================
 
-      const newLoanAmountPaid =
-        Number(
-          (
-            currentLoanAmountPaid +
-            amount
-          ).toFixed(2)
-        );
+      const newLoanAmountPaid = Number(
+        (currentLoanAmountPaid + amount).toFixed(2),
+      );
 
-      const newLoanOutstanding =
-        Number(
-          Math.max(
-            outstandingAmount -
-              amount,
-            0
-          ).toFixed(2)
-        );
+      const newLoanOutstanding = Number(
+        Math.max(outstandingAmount - amount, 0).toFixed(2),
+      );
 
-      loan.amountPaid =
-        newLoanAmountPaid;
+      loan.amountPaid = newLoanAmountPaid;
 
-      loan.outstandingAmount =
-        newLoanOutstanding;
+      loan.outstandingAmount = newLoanOutstanding;
 
       // =====================================================
       // UPDATE LOAN STATUS
       // =====================================================
 
-      if (
-        newLoanOutstanding <=
-        0.01
-      ) {
-        loan.outstandingAmount =
-          0;
+      if (newLoanOutstanding <= 0.01) {
+        loan.outstandingAmount = 0;
 
-        loan.amountPaid =
-          Number(
-            loan.totalRepayment
-          );
+        loan.amountPaid = Number(loan.totalRepayment);
 
-        loan.status =
-          "completed";
-      } else if (
-        loan.status ===
-        "defaulted"
-      ) {
+        loan.status = "completed";
+      } else if (loan.status === "defaulted") {
         // Preserve defaulted status.
-        loan.status =
-          "defaulted";
-      } else if (
-        loan.status ===
-        "overdue"
-      ) {
+        loan.status = "defaulted";
+      } else if (loan.status === "overdue") {
         // Preserve overdue status.
-        loan.status =
-          "overdue";
+        loan.status = "overdue";
       } else {
-        loan.status =
-          "active";
+        loan.status = "active";
       }
 
       await loan.save({
@@ -723,72 +461,41 @@ class RepaymentSettlementService {
       // UPDATE REPAYMENT SCHEDULE
       // =====================================================
 
-      const currentScheduleAmountPaid =
-        Number(
-          schedule.amountPaid || 0
-        );
+      const currentScheduleAmountPaid = Number(schedule.amountPaid || 0);
 
-      const newScheduleAmountPaid =
-        Number(
-          (
-            currentScheduleAmountPaid +
-            amount
-          ).toFixed(2)
-        );
+      const newScheduleAmountPaid = Number(
+        (currentScheduleAmountPaid + amount).toFixed(2),
+      );
 
-      const newScheduleOutstanding =
-        Number(
-          Math.max(
-            scheduleOutstanding -
-              amount,
-            0
-          ).toFixed(2)
-        );
+      const newScheduleOutstanding = Number(
+        Math.max(scheduleOutstanding - amount, 0).toFixed(2),
+      );
 
-      schedule.amountPaid =
-        newScheduleAmountPaid;
+      schedule.amountPaid = newScheduleAmountPaid;
 
-      schedule.amountOutstanding =
-        newScheduleOutstanding;
+      schedule.amountOutstanding = newScheduleOutstanding;
 
       // =====================================================
       // SCHEDULE STATUS
       // =====================================================
 
-      if (
-        newScheduleOutstanding <=
-        0.01
-      ) {
-        schedule.amountOutstanding =
-          0;
+      if (newScheduleOutstanding <= 0.01) {
+        schedule.amountOutstanding = 0;
 
-        schedule.amountPaid =
-          Number(
-            schedule.totalRepaymentAmount
-          );
+        schedule.amountPaid = Number(schedule.totalRepaymentAmount);
 
-        schedule.status =
-          "paid";
+        schedule.status = "paid";
       } else {
-        const hasOverdueInstallment =
-          schedule.installments.some(
-            (installment) =>
-              installment.status ===
-                "overdue" &&
-              Number(
-                installment.remainingAmount ||
-                  0
-              ) > 0
-          );
+        const hasOverdueInstallment = schedule.installments.some(
+          (installment) =>
+            installment.status === "overdue" &&
+            Number(installment.remainingAmount || 0) > 0,
+        );
 
-        if (
-          hasOverdueInstallment
-        ) {
-          schedule.status =
-            "overdue";
+        if (hasOverdueInstallment) {
+          schedule.status = "overdue";
         } else {
-          schedule.status =
-            "partially_paid";
+          schedule.status = "partially_paid";
         }
       }
 
@@ -802,6 +509,19 @@ class RepaymentSettlementService {
 
       await session.commitTransaction();
 
+      // =======================================================
+      // COMPLETE RELATED LOAN APPLICATION
+      // =======================================================
+      //
+      // The application is completed only when the actual
+      // loan has been fully repaid.
+      //
+
+      if (loan.status === "completed" && loan.loanApplication) {
+        await LoanApplicationService.completeApplicationFromRepayment(
+          loan.loanApplication,
+        );
+      }
       // =====================================================
       // RETURN RESULT
       // =====================================================
@@ -809,14 +529,11 @@ class RepaymentSettlementService {
       return {
         settled: true,
 
-        repaymentId:
-          repayment._id,
+        repaymentId: repayment._id,
 
-        loanId:
-          loan._id,
+        loanId: loan._id,
 
-        repaymentScheduleId:
-          schedule._id,
+        repaymentScheduleId: schedule._id,
 
         amount,
 
@@ -826,26 +543,19 @@ class RepaymentSettlementService {
 
         unallocatedAmount,
 
-        repaymentStatus:
-          repayment.status,
+        repaymentStatus: repayment.status,
 
-        loanStatus:
-          loan.status,
+        loanStatus: loan.status,
 
-        loanAmountPaid:
-          loan.amountPaid,
+        loanAmountPaid: loan.amountPaid,
 
-        loanOutstandingAmount:
-          loan.outstandingAmount,
+        loanOutstandingAmount: loan.outstandingAmount,
 
-        scheduleStatus:
-          schedule.status,
+        scheduleStatus: schedule.status,
 
-        scheduleAmountPaid:
-          schedule.amountPaid,
+        scheduleAmountPaid: schedule.amountPaid,
 
-        scheduleAmountOutstanding:
-          schedule.amountOutstanding,
+        scheduleAmountOutstanding: schedule.amountOutstanding,
       };
     } catch (error) {
       // =====================================================
@@ -869,5 +579,4 @@ class RepaymentSettlementService {
   }
 }
 
-module.exports =
-  RepaymentSettlementService;
+module.exports = RepaymentSettlementService;

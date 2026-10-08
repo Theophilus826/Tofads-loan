@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const LoanService = require("../services/LoanService");
@@ -36,8 +35,7 @@ const sendError = (res, error, fallbackMessage) => {
   // Duplicate MongoDB key
   if (error?.code === 11000) {
     const duplicateField =
-      Object.keys(error.keyPattern || {})[0] ||
-      "value";
+      Object.keys(error.keyPattern || {})[0] || "value";
 
     return res.status(409).json({
       success: false,
@@ -133,21 +131,6 @@ const getLoanProduct = async (req, res, next) => {
 // =========================================================
 // PREVIEW LOAN
 // =========================================================
-//
-// This does NOT create a loan application.
-//
-// Server calculates:
-//
-// amount
-// interest
-// processing fee
-// service fee
-// total repayment
-// number of installments
-// installment amount
-//
-// Preview does not create a Loan or LoanApplication.
-//
 
 const previewLoan = async (req, res, next) => {
   try {
@@ -196,22 +179,6 @@ const previewLoan = async (req, res, next) => {
 // =========================================================
 // CREATE LOAN APPLICATION
 // =========================================================
-//
-// The frontend sends only:
-//
-// loanProductId
-// amountRequested
-// durationDays
-// purpose
-// monthlyIncome
-// employmentStatus
-//
-// LoanService owns all pricing calculations.
-//
-// Actual eligibility checks happen server-side.
-// Verified KYC and a verified primary bank account
-// are required before an application is created.
-//
 
 const createLoanApplication = async (
   req,
@@ -300,7 +267,11 @@ const getUserApplications = async (
       error.message,
     );
 
-    return next(error);
+    return sendError(
+      res,
+      error,
+      "Failed to load loan applications",
+    );
   }
 };
 
@@ -373,14 +344,104 @@ const getUserApplication = async (
 };
 
 // =========================================================
-// GET MY ACTUAL LOANS
+// GET MY ACTIVE APPLICATION
+// =========================================================
+
+const getMyActiveApplication = async (
+  req,
+  res,
+  next,
+) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication is required",
+      });
+    }
+
+    const application =
+      await LoanService.getMyActiveApplication(
+        userId,
+      );
+
+    return res.status(200).json({
+      success: true,
+      data: application,
+    });
+  } catch (error) {
+    console.error(
+      "GET ACTIVE APPLICATION ERROR:",
+      error.message,
+    );
+
+    return sendError(
+      res,
+      error,
+      "Failed to load active application",
+    );
+  }
+};
+
+// =========================================================
+// GET AVAILABLE PRODUCTS FOR NEXT LOAN
 // =========================================================
 //
-// These are real Loan documents created after a
-// customer accepts an approved LoanOffer.
+// If the customer has:
+// submitted/pending/under_review/credit_check/
+// approved/offer_created/disbursed
 //
-// This is NOT the same as LoanApplication.
+// they receive an empty list.
 //
+// If the application is completed,
+// active products are returned.
+//
+// =========================================================
+
+const getAvailableProducts = async (
+  req,
+  res,
+  next,
+) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication is required",
+      });
+    }
+
+    const products =
+      await LoanService.getAvailableProducts(
+        userId,
+      );
+
+    return res.status(200).json({
+      success: true,
+      count: products.length,
+      data: products,
+    });
+  } catch (error) {
+    console.error(
+      "GET AVAILABLE LOAN PRODUCTS ERROR:",
+      error.message,
+    );
+
+    return sendError(
+      res,
+      error,
+      "Failed to load available loan products",
+    );
+  }
+};
+
+// =========================================================
+// GET MY ACTUAL LOANS
+// =========================================================
 
 const getMyLoans = async (
   req,
@@ -430,7 +491,7 @@ const getMyLoan = async (
   next,
 ) => {
   try {
-    const userId = getAuthenticatedUserId();
+    const userId = getAuthenticatedUserId(req);
     const { id } = req.params;
 
     if (!userId) {
@@ -487,16 +548,6 @@ const getMyLoan = async (
 // =========================================================
 // GET CUSTOMER LOAN DASHBOARD
 // =========================================================
-//
-// Returns customer-specific loan information:
-//
-// applications
-// active application
-// actual loans
-// active loan
-//
-// No admin data is exposed.
-//
 
 const getLoanDashboard = async (
   req,
@@ -585,45 +636,6 @@ const createLoanProduct = async (
       error.message,
     );
 
-    if (error?.code === 11000) {
-      const duplicateField =
-        Object.keys(
-          error.keyPattern || {},
-        )[0] || "code";
-
-      return res.status(409).json({
-        success: false,
-        message:
-          duplicateField === "code"
-            ? "A loan product with this code already exists"
-            : "A loan product with this value already exists",
-        field: duplicateField,
-      });
-    }
-
-    if (
-      error?.name === "ValidationError"
-    ) {
-      const errors = {};
-
-      for (const [
-        field,
-        validationError,
-      ] of Object.entries(
-        error.errors || {},
-      )) {
-        errors[field] =
-          validationError.message;
-      }
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid loan product data",
-        errors,
-      });
-    }
-
     return sendError(
       res,
       error,
@@ -643,11 +655,12 @@ const getAllLoanApplications = async (
 ) => {
   try {
     const applications =
-      await LoanService.getAllLoanApplications();
+      await LoanService.getAllApplications(
+        req.query,
+      );
 
     return res.status(200).json({
       success: true,
-      count: applications.length,
       data: applications,
     });
   } catch (error) {
@@ -656,7 +669,62 @@ const getAllLoanApplications = async (
       error.message,
     );
 
-    return next(error);
+    return sendError(
+      res,
+      error,
+      "Failed to load loan applications",
+    );
+  }
+};
+
+// =========================================================
+// GET SINGLE LOAN APPLICATION - ADMIN
+// =========================================================
+
+const getLoanApplication = async (
+  req,
+  res,
+  next,
+) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Loan application ID is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid loan application ID",
+      });
+    }
+
+    const application =
+      await LoanService.getApplicationById(
+        id,
+      );
+
+    return res.status(200).json({
+      success: true,
+      data: application,
+    });
+  } catch (error) {
+    console.error(
+      "GET LOAN APPLICATION ERROR:",
+      error.message,
+    );
+
+    return sendError(
+      res,
+      error,
+      "Failed to load loan application",
+    );
   }
 };
 
@@ -670,8 +738,20 @@ const updateLoanApplicationStatus = async (
   next,
 ) => {
   try {
+    const adminId = getAuthenticatedUserId(req);
     const { id } = req.params;
-    const { status } = req.body || {};
+    const {
+      status,
+      rejectionReason,
+    } = req.body || {};
+
+    if (!adminId) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Authenticated admin is required",
+      });
+    }
 
     if (!id) {
       return res.status(400).json({
@@ -700,57 +780,24 @@ const updateLoanApplicationStatus = async (
       });
     }
 
-    const allowedStatuses = [
-      "submitted",
-      "pending",
-      "under_review",
-      "credit_check",
-      "approved",
-      "offer_created",
-      "rejected",
-      "cancelled",
-      "disbursed",
-      "completed",
-    ];
-
     const normalizedStatus =
       status.trim();
 
-    if (
-      !allowedStatuses.includes(
-        normalizedStatus,
-      )
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid loan application status",
-        receivedStatus:
-          normalizedStatus,
-        allowedStatuses,
-      });
-    }
-
     const application =
-      await LoanService.updateLoanApplicationStatus(
+      await LoanService.updateApplicationStatus(
         id,
         normalizedStatus,
+        adminId,
+        rejectionReason,
       );
-
-    if (!application) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Loan application not found",
-      });
-    }
 
     return res.status(200).json({
       success: true,
-      message: `Loan application ${normalizedStatus.replace(
-        /_/g,
-        " ",
-      )} successfully`,
+      message:
+        `Loan application ${normalizedStatus.replace(
+          /_/g,
+          " ",
+        )} successfully`,
       data: application,
     });
   } catch (error) {
@@ -763,6 +810,146 @@ const updateLoanApplicationStatus = async (
       res,
       error,
       "Failed to update loan application status",
+    );
+  }
+};
+
+// =========================================================
+// COMPLETE LOAN APPLICATION
+// =========================================================
+//
+// Called when the customer's final repayment has been
+// confirmed.
+//
+// Only:
+//     disbursed -> completed
+//
+// is allowed by the service.
+//
+// Once completed, the customer's previous application
+// is no longer considered active and the customer can
+// apply for another loan product.
+//
+// =========================================================
+
+const completeLoanApplication = async (
+  req,
+  res,
+  next,
+) => {
+  try {
+    const adminId = getAuthenticatedUserId(req);
+    const { id } = req.params;
+
+    if (!adminId) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Authenticated admin is required",
+      });
+    }
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Loan application ID is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid loan application ID",
+      });
+    }
+
+    const application =
+      await LoanService.completeApplication(
+        id,
+        adminId,
+      );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Loan application completed successfully",
+      data: application,
+    });
+  } catch (error) {
+    console.error(
+      "COMPLETE LOAN APPLICATION ERROR:",
+      error.message,
+    );
+
+    return sendError(
+      res,
+      error,
+      "Failed to complete loan application",
+    );
+  }
+};
+
+// =========================================================
+// DISBURSE LOAN APPLICATION - ADMIN
+// =========================================================
+
+const disburseLoanApplication = async (
+  req,
+  res,
+  next,
+) => {
+  try {
+    const adminId = getAuthenticatedUserId(req);
+    const { id } = req.params;
+
+    if (!adminId) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Authenticated admin is required",
+      });
+    }
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Loan application ID is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid loan application ID",
+      });
+    }
+
+    const application =
+      await LoanService.disburseApplication(
+        id,
+        adminId,
+      );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Loan application disbursed successfully",
+      data: application,
+    });
+  } catch (error) {
+    console.error(
+      "DISBURSE LOAN APPLICATION ERROR:",
+      error.message,
+    );
+
+    return sendError(
+      res,
+      error,
+      "Failed to disburse loan application",
     );
   }
 };
@@ -781,6 +968,8 @@ module.exports = {
   createLoanApplication,
   getUserApplications,
   getUserApplication,
+  getMyActiveApplication,
+  getAvailableProducts,
 
   // Customer - actual loans
   getMyLoans,
@@ -792,5 +981,8 @@ module.exports = {
 
   // Admin - loan applications
   getAllLoanApplications,
+  getLoanApplication,
   updateLoanApplicationStatus,
+  disburseLoanApplication,
+  completeLoanApplication,
 };

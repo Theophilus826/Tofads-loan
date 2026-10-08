@@ -15,6 +15,10 @@ const createError = (
   return error;
 };
 
+// =========================================================
+// VALID STATUSES
+// =========================================================
+
 const VALID_STATUSES = [
   "submitted",
   "pending",
@@ -28,6 +32,9 @@ const VALID_STATUSES = [
   "completed",
 ];
 
+// =========================================================
+// STATUS TRANSITIONS
+// =========================================================
 
 const STATUS_TRANSITIONS = {
   submitted: [
@@ -64,6 +71,7 @@ const STATUS_TRANSITIONS = {
 
   offer_created: [
     "cancelled",
+    "disbursed",
   ],
 
   rejected: [],
@@ -76,8 +84,6 @@ const STATUS_TRANSITIONS = {
 
   completed: [],
 };
-
-
 
 // =========================================================
 // CUSTOMER
@@ -130,7 +136,7 @@ const getMyActiveApplication = async (
 };
 
 // =========================================================
-// ADMIN
+// ADMIN — APPLICATIONS
 // =========================================================
 
 const getAllApplications = async (
@@ -207,7 +213,7 @@ const validateTransition = (
 };
 
 // =========================================================
-// ADMIN — UPDATE STATUS
+// UPDATE STATUS
 // =========================================================
 
 const updateApplicationStatus = async (
@@ -346,13 +352,110 @@ const cancelApplication = async (
 };
 
 // =========================================================
-// ADMIN — DASHBOARD STATS
+// ADMIN — DISBURSE
+// =========================================================
+
+const disburseApplication = async (
+  applicationId,
+  adminUserId
+) => {
+  return updateApplicationStatus(
+    applicationId,
+    "disbursed",
+    adminUserId
+  );
+};
+
+// =========================================================
+// ADMIN / REPAYMENT — COMPLETE
+// =========================================================
+
+const completeApplication = async (
+  applicationId,
+  adminUserId
+) => {
+  return updateApplicationStatus(
+    applicationId,
+    "completed",
+    adminUserId
+  );
+};
+
+// =========================================================
+// DASHBOARD STATS
 // =========================================================
 
 const getApplicationStats =
   async () => {
     return LoanApplicationRepository.getApplicationStats();
   };
+
+// =========================================================
+// CUSTOMER — AVAILABLE PRODUCTS
+// =========================================================
+
+const getAvailableProducts = async (
+  userId
+) => {
+  if (!userId) {
+    throw createError(
+      "Authenticated user is required",
+      401
+    );
+  }
+
+  return LoanApplicationRepository.findAvailableProductsForUser(
+    userId
+  );
+};
+
+// =========================================================
+// SYSTEM — COMPLETE AFTER FULL REPAYMENT
+// =========================================================
+
+const completeApplicationFromRepayment = async (
+  applicationId
+) => {
+  if (!applicationId) {
+    throw createError(
+      "Loan application is required",
+      400
+    );
+  }
+
+  const application =
+    await LoanApplicationRepository.findApplicationByIdAdmin(
+      applicationId
+    );
+
+  if (!application) {
+    throw createError(
+      "Loan application not found",
+      404
+    );
+  }
+
+  // Idempotent: already completed is fine.
+  if (application.status === "completed") {
+    return application;
+  }
+
+  // Only a disbursed application can become completed
+  // through repayment.
+  if (application.status !== "disbursed") {
+    throw createError(
+      `Loan application cannot be completed from status "${application.status}"`,
+      400
+    );
+  }
+
+  return LoanApplicationRepository.updateApplicationStatus(
+    applicationId,
+    "completed",
+    null,
+    null
+  );
+};
 
 // =========================================================
 // EXPORTS
@@ -364,6 +467,7 @@ module.exports = {
   getMyApplications,
   getMyApplication,
   getMyActiveApplication,
+  getAvailableProducts,
 
   // Admin
   getAllApplications,
@@ -375,6 +479,8 @@ module.exports = {
   approveApplication,
   rejectApplication,
   cancelApplication,
-
+  disburseApplication,
+  completeApplication,
+  completeApplicationFromRepayment,
   getApplicationStats,
 };

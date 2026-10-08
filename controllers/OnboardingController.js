@@ -38,8 +38,16 @@ const getOnboardingStatus = async (req, res) => {
     }).sort({ createdAt: -1 });
 
     // =========================================================
-    // LOAN APPLICATION
+    // ACTIVE LOAN APPLICATION
     // =========================================================
+    //
+    // IMPORTANT:
+    // "completed" is intentionally NOT included here.
+    //
+    // A completed application belongs to the customer's
+    // previous loan cycle and must not prevent a new loan
+    // application.
+    //
 
     const activeApplicationStatuses = [
       "submitted",
@@ -64,7 +72,7 @@ const getOnboardingStatus = async (req, res) => {
       .sort({ createdAt: -1 });
 
     // =========================================================
-    // ACTUAL LOAN
+    // ACTIVE LOAN
     // =========================================================
 
     const activeLoanStatuses = [
@@ -86,6 +94,33 @@ const getOnboardingStatus = async (req, res) => {
         "name code currency",
       )
       .sort({ createdAt: -1 });
+
+    // =========================================================
+    // COMPLETED LOAN
+    // =========================================================
+    //
+    // RepaymentSettlementService changes:
+    //
+    // loan.status = "completed"
+    //
+    // when outstandingAmount reaches zero.
+    //
+    // This represents the customer's previous completed
+    // loan cycle.
+    //
+
+    const completedLoan = await Loan.findOne({
+      user: userId,
+      status: "completed",
+    })
+      .populate(
+        "loanProduct",
+        "name code currency",
+      )
+      .sort({
+        updatedAt: -1,
+        createdAt: -1,
+      });
 
     // =========================================================
     // ACTIVE OFFER
@@ -123,32 +158,13 @@ const getOnboardingStatus = async (req, res) => {
     // REPAYMENT ACCOUNT
     // =========================================================
     //
-    // The repayment account is reusable for future repayments.
-    // It is NOT the same thing as a repayment schedule.
+    // The repayment account is reusable.
     //
+    // It does NOT determine whether the loan is completed.
+    //
+
     const repaymentAccount = await RepaymentAccount.findOne({
       user: userId,
-    }).sort({ createdAt: -1 });
-
-    // =========================================================
-    // ACTIVE MANDATE
-    // =========================================================
-
-    const activeMandate = await Mandate.findOne({
-      user: userId,
-      ...(activeOffer?._id
-        ? {
-            loanOffer: activeOffer._id,
-          }
-        : {}),
-      status: {
-        $in: [
-          "pending",
-          "authorization_required",
-          "authorized",
-          "active",
-        ],
-      },
     }).sort({ createdAt: -1 });
 
     // =========================================================
@@ -165,6 +181,29 @@ const getOnboardingStatus = async (req, res) => {
       Number(repaymentAccount?.balance || 0);
 
     // =========================================================
+    // ACTIVE MANDATE
+    // =========================================================
+
+    const activeMandate = await Mandate.findOne({
+      user: userId,
+
+      ...(activeOffer?._id
+        ? {
+            loanOffer: activeOffer._id,
+          }
+        : {}),
+
+      status: {
+        $in: [
+          "pending",
+          "authorization_required",
+          "authorized",
+          "active",
+        ],
+      },
+    }).sort({ createdAt: -1 });
+
+    // =========================================================
     // MANDATE STATE
     // =========================================================
 
@@ -177,6 +216,36 @@ const getOnboardingStatus = async (req, res) => {
           "active",
         ].includes(activeMandate.status),
     );
+
+    // =========================================================
+    // CAN APPLY FOR NEW LOAN
+    // =========================================================
+    //
+    // A customer can start another loan cycle when:
+    //
+    // 1. They have completed a previous loan.
+    // 2. They do not currently have an active loan.
+    // 3. They do not have an active offer.
+    // 4. They do not have another active application.
+    //
+    // This means:
+    //
+    // completed loan
+    //      +
+    // no active loan
+    //      +
+    // no active application
+    //      +
+    // no active offer
+    //      =
+    // can apply again
+    //
+
+    const canApplyForNewLoan =
+      !!completedLoan &&
+      !loan &&
+      !activeOffer &&
+      !loanApplication;
 
     // =========================================================
     // DETERMINE NEXT STEP
@@ -218,25 +287,43 @@ const getOnboardingStatus = async (req, res) => {
       )
     ) {
       nextStep = "OFFER";
-    } else if (
-      loanApplication ||
-      loan
-    ) {
+    } else if (loanApplication) {
       nextStep = "REVIEW";
+    } else if (completedLoan) {
+      // =======================================================
+      // PREVIOUS LOAN IS FULLY PAID
+      // =======================================================
+      //
+      // The previous loan cycle is finished.
+      // The customer can begin a new loan application.
+      //
+
+      nextStep = "LOAN";
     } else {
       nextStep = "LOAN";
     }
 
     // =========================================================
-    // CURRENT STATUS
+    // LOAN STATUS
     // =========================================================
 
     const loanStatus =
       loan?.status ||
       loanApplication?.status ||
+      completedLoan?.status ||
       null;
 
-    const currentStatus =
+    // =========================================================
+    // CURRENT STATUS
+    // =========================================================
+    //
+    // Active states always take priority.
+    //
+    // If there is no active process and the latest completed
+    // loan exists, explicitly expose COMPLETED.
+    //
+
+    let currentStatus =
       activeRepayment?.status ||
       activeMandate?.status ||
       loan?.status ||
@@ -244,17 +331,30 @@ const getOnboardingStatus = async (req, res) => {
       loanApplication?.status ||
       null;
 
+    if (
+      !loan &&
+      !activeOffer &&
+      !loanApplication &&
+      completedLoan
+    ) {
+      currentStatus = "COMPLETED";
+    }
+
     // =========================================================
     // IDS
     // =========================================================
 
-    const loanId = loan?._id || null;
+    const loanId =
+      loan?._id ||
+      completedLoan?._id ||
+      null;
 
     const applicationId =
-      loanApplication?._id || null;
+      loanApplication?._id ||
+      null;
 
     // =========================================================
-    // RESPONSE
+    // KYC STATUS
     // =========================================================
 
     const kycStatus = String(
@@ -263,12 +363,23 @@ const getOnboardingStatus = async (req, res) => {
       .trim()
       .toUpperCase();
 
+    // =========================================================
+    // RESPONSE
+    // =========================================================
+
     return res.status(200).json({
       success: true,
 
       onboarding: {
         nextStep,
+
         currentStatus,
+
+        // =====================================================
+        // NEW LOAN ELIGIBILITY
+        // =====================================================
+
+        canApplyForNewLoan,
 
         // =====================================================
         // KYC
@@ -276,6 +387,7 @@ const getOnboardingStatus = async (req, res) => {
 
         kyc: {
           completed: kycStatus === "VERIFIED",
+
           status: kycStatus,
         },
 
@@ -285,9 +397,12 @@ const getOnboardingStatus = async (req, res) => {
 
         bank: {
           completed: !!bankAccount,
+
           verified: !!bankAccount,
+
           accountId:
-            bankAccount?._id || null,
+            bankAccount?._id ||
+            null,
         },
 
         // =====================================================
@@ -297,7 +412,8 @@ const getOnboardingStatus = async (req, res) => {
         loan: {
           exists:
             !!loan ||
-            !!loanApplication,
+            !!loanApplication ||
+            !!completedLoan,
 
           status: loanStatus,
 
@@ -312,7 +428,29 @@ const getOnboardingStatus = async (req, res) => {
           loanProduct:
             loanApplication?.loanProduct ||
             loan?.loanProduct ||
+            completedLoan?.loanProduct ||
             null,
+
+          // ---------------------------------------------------
+          // COMPLETED LOAN
+          // ---------------------------------------------------
+
+          completed:
+            !!completedLoan,
+
+          completedLoanId:
+            completedLoan?._id ||
+            null,
+
+          completedLoanStatus:
+            completedLoan?.status ||
+            null,
+
+          // ---------------------------------------------------
+          // NEW APPLICATION ELIGIBILITY
+          // ---------------------------------------------------
+
+          canApplyForNewLoan,
         },
 
         // =====================================================
@@ -338,11 +476,10 @@ const getOnboardingStatus = async (req, res) => {
         // =====================================================
         // REPAYMENT ACCOUNT
         // =====================================================
-        //
-        // Reusable customer repayment wallet/account.
-        //
+
         repaymentAccount: {
-          exists: hasRepaymentAccount,
+          exists:
+            hasRepaymentAccount,
 
           accountId:
             repaymentAccount?._id ||
@@ -396,7 +533,8 @@ const getOnboardingStatus = async (req, res) => {
         // =====================================================
 
         repayment: {
-          exists: !!activeRepayment,
+          exists:
+            !!activeRepayment,
 
           status:
             activeRepayment?.status ||
@@ -417,7 +555,8 @@ const getOnboardingStatus = async (req, res) => {
         // =====================================================
 
         mandate: {
-          exists: !!activeMandate,
+          exists:
+            !!activeMandate,
 
           status:
             activeMandate?.status ||
@@ -441,6 +580,7 @@ const getOnboardingStatus = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message:
         "Unable to load onboarding status",
     });

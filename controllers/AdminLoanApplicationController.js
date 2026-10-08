@@ -253,6 +253,59 @@ const getApplicationStats =
     });
   });
 
+  // =========================================================
+// ADMIN — DISBURSE APPLICATION
+// =========================================================
+
+const disburseApplication =
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const adminUserId =
+      getUserId(req);
+
+    const application =
+      await LoanApplicationService.disburseApplication(
+        id,
+        adminUserId
+      );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Loan application marked as disbursed",
+      data: application,
+    });
+  });
+
+// =========================================================
+// ADMIN — COMPLETE APPLICATION
+// =========================================================
+//
+// This should normally be called after the related loan
+// has been fully repaid.
+//
+
+const completeApplication =
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const adminUserId =
+      getUserId(req);
+
+    const application =
+      await LoanApplicationService.completeApplication(
+        id,
+        adminUserId
+      );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Loan application completed",
+      data: application,
+    });
+  });
 // =========================================================
 // EXPORTS
 // =========================================================
@@ -271,4 +324,6 @@ module.exports = {
   updateApplicationStatus,
 
   getApplicationStats,
+  disburseApplication,
+  completeApplication,
 };

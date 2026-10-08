@@ -30,6 +30,16 @@ const loanProductPopulate = `
   repaymentFrequency
 `;
 
+const ACTIVE_APPLICATION_STATUSES = [
+  "submitted",
+  "pending",
+  "under_review",
+  "credit_check",
+  "approved",
+  "offer_created",
+  "disbursed",
+];
+
 // =========================================================
 // LOAN PRODUCTS
 // =========================================================
@@ -167,19 +177,12 @@ const createApplication = async (
   }
 
   const existingApplication =
-    await LoanApplication.findOne({
-      user: userId,
-      status: {
-        $in: [
-          "submitted",
-          "pending",
-          "under_review",
-          "credit_check",
-          "approved",
-          "offer_created",
-        ],
-      },
-    });
+  await LoanApplication.findOne({
+    user: userId,
+    status: {
+      $in: ACTIVE_APPLICATION_STATUSES,
+    },
+  });
 
   if (existingApplication) {
     throw createError(
@@ -296,14 +299,7 @@ const findActiveApplicationByUser = async (
   return LoanApplication.findOne({
     user: userId,
     status: {
-      $in: [
-        "submitted",
-        "pending",
-        "under_review",
-        "credit_check",
-        "approved",
-        "offer_created",
-      ],
+      $in: ACTIVE_APPLICATION_STATUSES,
     },
   })
     .populate(
@@ -582,6 +578,84 @@ const getApplicationStats = async () => {
 };
 
 // =========================================================
+// CUSTOMER — AVAILABLE NEXT PRODUCTS
+// =========================================================
+
+const findAvailableProductsForUser = async (
+  userId
+) => {
+  if (!userId) {
+    throw createError(
+      "Authenticated user is required",
+      401
+    );
+  }
+
+  const activeApplication =
+    await findActiveApplicationByUser(userId);
+
+  if (activeApplication) {
+    return [];
+  }
+
+  return LoanProduct.find({
+    status: "active",
+  }).sort({
+    createdAt: -1,
+  });
+};
+
+// =========================================================
+// SYSTEM — COMPLETE APPLICATION FROM REPAYMENT
+// =========================================================
+
+const completeApplicationFromRepayment = async (
+  applicationId
+) => {
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      applicationId
+    )
+  ) {
+    throw createError(
+      "Invalid loan application ID",
+      400
+    );
+  }
+
+  const application =
+    await LoanApplication.findByIdAndUpdate(
+      applicationId,
+      {
+        $set: {
+          status: "completed",
+        },
+      },
+      {
+        returnDocument: "after",
+        runValidators: true,
+      }
+    )
+      .populate(
+        "user",
+        "name email phone avatar"
+      )
+      .populate(
+        "loanProduct",
+        loanProductPopulate
+      )
+      .populate(
+        "reviewedBy",
+        "name email"
+      )
+      .populate(
+        "creditAssessment"
+      );
+
+  return application;
+};
+
+// =========================================================
 // EXPORTS
 // =========================================================
 
@@ -602,4 +676,6 @@ module.exports = {
   findApplicationByIdAdmin,
   updateApplicationStatus,
   getApplicationStats,
+  findAvailableProductsForUser,
+  completeApplicationFromRepayment,
 };
