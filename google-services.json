@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "926126937761",
+    "project_id": "menumoney-60681",
+    "storage_bucket": "menumoney-60681.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:926126937761:android:51b9c27377cc222f5f42e0",
+        "android_client_info": {
+          "package_name": "com.menumoney"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC6AylSgrKxGcXPcZpAj90YKIvG_rnEBj4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

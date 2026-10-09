@@ -64,4 +64,11 @@ router.put(
   SettingsController.updateAdminSettings
 );
 
+
+router.get(
+  "/widget",
+  protect,
+  SettingsController.getWidgetSettings
+);
+
 module.exports = router;

@@ -1,6 +1,5 @@
-const PlatformSettings = require(
-  "../model/PlatformSettings"
-);
+
+const PlatformSettings = require("../model/PlatformSettings");
 
 // =========================================================
 // ALLOWED REGISTRATION ROLES
@@ -13,47 +12,57 @@ const ALLOWED_REGISTRATION_ROLES = [
   "super_admin",
 ];
 
+const DEFAULT_WIDGET_MESSAGE =
+  "Check your next loan installment and repayment details.";
+
 // =========================================================
 // GET ADMIN SETTINGS
 // GET /api/settings/admin
 // =========================================================
 
-const getAdminSettings = async (
-  req,
-  res,
-  next
-) => {
+const getAdminSettings = async (req, res, next) => {
   try {
-    let settings =
-      await PlatformSettings.findOne();
-
-    // -----------------------------------------------------
-    // CREATE DEFAULT SETTINGS
-    // -----------------------------------------------------
+    let settings = await PlatformSettings.findOne();
 
     if (!settings) {
-      settings =
-        await PlatformSettings.create({
-          platformName: "Lovest",
-
-          currency: "NGN",
-
-          maintenanceMode: false,
-
-          allowNewApplications: true,
-
-          allowNewRegistrations: true,
-
-          defaultUserRole: "customer",
-
-          updatedBy:
-            req.user?._id || null,
-        });
+      settings = await PlatformSettings.create({
+        platformName: "Lovest",
+        currency: "NGN",
+        maintenanceMode: false,
+        allowNewApplications: true,
+        allowNewRegistrations: true,
+        defaultUserRole: "customer",
+        widgetMessage: DEFAULT_WIDGET_MESSAGE,
+        updatedBy: req.user?._id || null,
+      });
     }
 
     return res.status(200).json({
       success: true,
       data: settings,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// =========================================================
+// GET CUSTOMER-SAFE WIDGET SETTINGS
+// GET /api/settings/widget
+// =========================================================
+
+const getWidgetSettings = async (req, res, next) => {
+  try {
+    let settings = await PlatformSettings.findOne()
+      .select("widgetMessage")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        widgetMessage:
+          settings?.widgetMessage || DEFAULT_WIDGET_MESSAGE,
+      },
     });
   } catch (error) {
     next(error);
@@ -65,16 +74,13 @@ const getAdminSettings = async (
 // PUT /api/settings/admin
 // =========================================================
 
-const updateAdminSettings = async (
-  req,
-  res,
-  next
-) => {
+const updateAdminSettings = async (req, res, next) => {
   try {
     const {
       platformName,
       supportEmail,
       supportPhone,
+      widgetMessage,
       currency,
       defaultUserRole,
       maintenanceMode,
@@ -82,129 +88,93 @@ const updateAdminSettings = async (
       allowNewRegistrations,
     } = req.body;
 
-    // -----------------------------------------------------
-    // FIND SETTINGS
-    // -----------------------------------------------------
-
-    let settings =
-      await PlatformSettings.findOne();
+    let settings = await PlatformSettings.findOne();
 
     if (!settings) {
-      settings =
-        new PlatformSettings();
+      settings = new PlatformSettings();
     }
 
-    // -----------------------------------------------------
     // PLATFORM
-    // -----------------------------------------------------
 
-    if (
-      platformName !== undefined
-    ) {
-      settings.platformName =
-        platformName;
+    if (platformName !== undefined) {
+      settings.platformName = platformName;
     }
 
-    if (
-      supportEmail !== undefined
-    ) {
-      settings.supportEmail =
-        supportEmail;
+    if (supportEmail !== undefined) {
+      settings.supportEmail = supportEmail;
     }
 
-    if (
-      supportPhone !== undefined
-    ) {
-      settings.supportPhone =
-        supportPhone;
+    if (supportPhone !== undefined) {
+      settings.supportPhone = supportPhone;
     }
 
     if (currency !== undefined) {
-      settings.currency =
-        currency;
+      settings.currency = currency;
     }
 
-    // -----------------------------------------------------
-    // DEFAULT REGISTRATION ROLE
-    // -----------------------------------------------------
+    // WIDGET MESSAGE
 
-    if (
-      defaultUserRole !== undefined
-    ) {
+    if (widgetMessage !== undefined) {
       if (
-        !ALLOWED_REGISTRATION_ROLES.includes(
-          defaultUserRole
-        )
+        typeof widgetMessage !== "string" ||
+        widgetMessage.length > 180
       ) {
         return res.status(400).json({
           success: false,
           message:
-            "Invalid default registration role",
+            "Widget message must be text of 180 characters or fewer.",
         });
       }
 
-      settings.defaultUserRole =
-        defaultUserRole;
+      settings.widgetMessage = widgetMessage.trim();
     }
 
-    // -----------------------------------------------------
+    // DEFAULT REGISTRATION ROLE
+
+    if (defaultUserRole !== undefined) {
+      if (
+        !ALLOWED_REGISTRATION_ROLES.includes(defaultUserRole)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid default registration role",
+        });
+      }
+
+      settings.defaultUserRole = defaultUserRole;
+    }
+
     // MAINTENANCE
-    // -----------------------------------------------------
 
-    if (
-      maintenanceMode !== undefined
-    ) {
-      settings.maintenanceMode =
-        Boolean(
-          maintenanceMode
-        );
+    if (maintenanceMode !== undefined) {
+      settings.maintenanceMode = Boolean(maintenanceMode);
     }
 
-    // -----------------------------------------------------
     // LOAN APPLICATIONS
-    // -----------------------------------------------------
 
-    if (
-      allowNewApplications !==
-      undefined
-    ) {
-      settings.allowNewApplications =
-        Boolean(
-          allowNewApplications
-        );
+    if (allowNewApplications !== undefined) {
+      settings.allowNewApplications = Boolean(
+        allowNewApplications
+      );
     }
 
-    // -----------------------------------------------------
     // REGISTRATION
-    // -----------------------------------------------------
 
-    if (
-      allowNewRegistrations !==
-      undefined
-    ) {
-      settings.allowNewRegistrations =
-        Boolean(
-          allowNewRegistrations
-        );
+    if (allowNewRegistrations !== undefined) {
+      settings.allowNewRegistrations = Boolean(
+        allowNewRegistrations
+      );
     }
 
-    // -----------------------------------------------------
     // AUDIT
-    // -----------------------------------------------------
 
-    settings.updatedBy =
-      req.user?._id || null;
-
-    // -----------------------------------------------------
-    // SAVE
-    // -----------------------------------------------------
+    settings.updatedBy = req.user?._id || null;
 
     await settings.save();
 
     return res.status(200).json({
       success: true,
-      message:
-        "Settings updated successfully",
+      message: "Settings updated successfully",
       data: settings,
     });
   } catch (error) {
@@ -214,5 +184,7 @@ const updateAdminSettings = async (
 
 module.exports = {
   getAdminSettings,
+  getWidgetSettings,
   updateAdminSettings,
 };
+
