@@ -33,6 +33,7 @@ const getAdminSettings = async (req, res, next) => {
         allowNewRegistrations: true,
         defaultUserRole: "customer",
         widgetMessage: DEFAULT_WIDGET_MESSAGE,
+        floatingReminderEnabled: false,
         updatedBy: req.user?._id || null,
       });
     }
@@ -54,7 +55,7 @@ const getAdminSettings = async (req, res, next) => {
 const getWidgetSettings = async (req, res, next) => {
   try {
     let settings = await PlatformSettings.findOne()
-      .select("widgetMessage")
+      .select("widgetMessage floatingReminderEnabled")
       .lean();
 
     return res.status(200).json({
@@ -62,6 +63,8 @@ const getWidgetSettings = async (req, res, next) => {
       data: {
         widgetMessage:
           settings?.widgetMessage || DEFAULT_WIDGET_MESSAGE,
+        floatingReminderEnabled:
+          settings?.floatingReminderEnabled ?? false,
       },
     });
   } catch (error) {
@@ -81,6 +84,7 @@ const updateAdminSettings = async (req, res, next) => {
       supportEmail,
       supportPhone,
       widgetMessage,
+      floatingReminderEnabled,
       currency,
       defaultUserRole,
       maintenanceMode,
@@ -164,6 +168,19 @@ const updateAdminSettings = async (req, res, next) => {
       settings.allowNewRegistrations = Boolean(
         allowNewRegistrations
       );
+    }
+
+        // FLOATING LOAN REMINDER
+
+    if (floatingReminderEnabled !== undefined) {
+      if (typeof floatingReminderEnabled !== "boolean") {
+        return res.status(400).json({
+          success: false,
+          message: "Floating reminder setting must be true or false.",
+        });
+      }
+
+      settings.floatingReminderEnabled = floatingReminderEnabled;
     }
 
     // AUDIT

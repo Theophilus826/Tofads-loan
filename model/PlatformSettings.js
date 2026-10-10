@@ -24,11 +24,16 @@ const platformSettingsSchema = new mongoose.Schema(
       trim: true,
     },
 
-    widgetMessage: {
+        widgetMessage: {
       type: String,
       default: "Check your next loan installment and repayment details.",
       trim: true,
       maxlength: 180,
+    },
+
+    floatingReminderEnabled: {
+      type: Boolean,
+      default: false,
     },
 
     currency: {
