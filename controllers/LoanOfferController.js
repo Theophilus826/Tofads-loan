@@ -259,16 +259,43 @@ const createOffer = async (req, res, next) => {
       createdBy: adminId,
     };
 
+
     // ---------------------------------------------------------
     // CREDIT ASSESSMENT
     // ---------------------------------------------------------
 
-    if (!application.creditAssessment) {
+    const requestedAssessmentId = req.body?.creditAssessmentId;
+
+    if (
+      requestedAssessmentId &&
+      !mongoose.Types.ObjectId.isValid(requestedAssessmentId)
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Credit assessment is required before creating a loan offer",
+        message: "Invalid credit assessment ID",
       });
     }
+
+    // Use the assessment supplied by the frontend when available.
+    // Otherwise, use the assessment already saved on the application.
+    const assessmentId =
+      requestedAssessmentId ||
+      application.creditAssessment?._id ||
+      application.creditAssessment;
+
+    if (!assessmentId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Credit assessment is required. Run the credit assessment before creating an offer.",
+      });
+    }
+
+    offerData.creditAssessment = assessmentId;
+
+    // Keep the application and offer linked to the same assessment.
+    // This is persisted together with the application status below.
+    application.creditAssessment = assessmentId;
 
     offerData.creditAssessment = application.creditAssessment;
 

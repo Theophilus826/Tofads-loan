@@ -34,7 +34,7 @@ const RepaymentWebhookRoutes = require("./routes/RepaymentWebhookRoute");
 const { startScheduler } = require("./jobs/scheduler");
 
 const RepaymentAccountRoutes = require("./routes/RepaymentAccountRoute");
-
+const appVersionRoutes = require("./routes/appVersionRoutes");
 const VerificationRoutes = require("./routes/VerificationRoute");
 const LedgerRoutes = require("./routes/LedgerRoute");
 const adminLedgerRoutes = require("./routes/AdminLedgerRoute");
@@ -179,21 +179,14 @@ const startServer = async () => {
     // ==========================
 
     app.use("/api/kyc", KycRoutes);
-    console.log("=================================");
-    console.log("🪪 KYC ROUTES MOUNTED");
-    console.log(" POST /api/kyc/webhook/paystack");
-    console.log(" POST /api/kyc/webhook/face");
-    console.log(" POST /api/kyc/bvn/verify");
-    console.log(" POST /api/kyc/face/verify");
-    console.log("=================================");
-    
+   
     // ==========================
     // ONBOARDING
     // ==========================
 
     app.use("/api/onboarding", OnboardingRoutes);
     app.use("/api/admin/repayments", AdminRepaymentControllerRoute);
-    
+    app.use("/api/app-version", appVersionRoutes);
     // ==========================
     // LOANS
     // ==========================

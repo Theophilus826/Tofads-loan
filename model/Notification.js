@@ -1,6 +1,7 @@
+
 const mongoose = require("mongoose");
 
-const mandateSchema = new mongoose.Schema(
+const notificationSchema = new mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.Types.ObjectId,
@@ -9,92 +10,75 @@ const mandateSchema = new mongoose.Schema(
       index: true,
     },
 
-    loanApplication: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "LoanApplication",
-      required: true,
-      index: true,
-    },
-
-    bankAccount: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "BankAccount",
-      required: true,
-      index: true,
-    },
-
-    mandateReference: {
+    recipientRole: {
       type: String,
-      required: true,
-      unique: true,
+      enum: ["user", "admin"],
+      default: "user",
       index: true,
     },
 
-    providerMandateId: {
-      type: String,
-      default: null,
-      index: true,
-      sparse: true,
-    },
-
-    provider: {
-      type: String,
-      default: null,
-    },
-
-    status: {
+    type: {
       type: String,
       enum: [
-        "pending",
-        "authorization_required",
-        "authorized",
-        "active",
-        "failed",
-        "cancelled",
-        "expired",
+        "loan_application",
+        "loan_status",
+        "loan_approved",
+        "loan_rejected",
+        "loan_disbursed",
+        "repayment",
+        "repayment_failed",
+        "repayment_due",
+        "mandate",
+        "system",
       ],
-      default: "pending",
+      required: true,
+    },
+
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 150,
+    },
+
+    message: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 1000,
+    },
+
+    relatedLoan: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "LoanApplication",
+      default: null,
       index: true,
     },
 
-    maxDebitAmount: {
-      type: Number,
+    relatedRepayment: {
+      type: mongoose.Schema.Types.ObjectId,
       default: null,
     },
 
-    currency: {
-      type: String,
-      default: "NGN",
-      uppercase: true,
+    relatedMandate: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Mandate",
+      default: null,
     },
 
-    providerData: {
+    isRead: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    readAt: {
+      type: Date,
+      default: null,
+    },
+
+    metadata: {
       type: mongoose.Schema.Types.Mixed,
-      default: null,
-    },
-
-    authorizationUrl: {
-      type: String,
-      default: null,
-    },
-
-    authorizedAt: {
-      type: Date,
-      default: null,
-    },
-
-    activatedAt: {
-      type: Date,
-      default: null,
-    },
-
-    cancelledAt: {
-      type: Date,
-      default: null,
-    },
-
-    expiresAt: {
-      type: Date,
       default: null,
     },
   },
@@ -103,11 +87,12 @@ const mandateSchema = new mongoose.Schema(
   }
 );
 
-mandateSchema.index({
+notificationSchema.index({
   user: 1,
-  status: 1,
+  isRead: 1,
+  createdAt: -1,
 });
 
 module.exports =
-  mongoose.models.Mandate ||
-  mongoose.model("Mandate", mandateSchema);
+  mongoose.models.Notification ||
+  mongoose.model("Notification", notificationSchema);

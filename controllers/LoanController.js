@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const LoanService = require("../services/LoanService");
+const NotificationService = require("../services/NotificationService");
 
 // =========================================================
 // HELPERS
@@ -55,6 +56,56 @@ const sendError = (res, error, fallbackMessage) => {
 
 const getAuthenticatedUserId = (req) => {
   return req.user?._id || req.user?.id || null;
+};
+
+
+/* =========================================================
+   LOAN NOTIFICATION HELPERS
+========================================================= */
+
+// Supports common loan ownership fields and populated references.
+const getLoanOwnerId = (application) => {
+  const owner =
+    application?.user ||
+    application?.applicant ||
+    application?.borrower ||
+    application?.customer ||
+    application?.userId;
+
+  if (owner && typeof owner === "object") {
+    return owner._id || owner.id || null;
+  }
+
+  return owner || null;
+};
+
+// Notifications must never break a successful loan operation.
+const sendLoanNotification = (notificationPromise) => {
+  Promise.resolve(notificationPromise).catch((error) => {
+    console.error(
+      "LOAN NOTIFICATION ERROR:",
+      error?.message || error,
+    );
+  });
+};
+
+// Load the application owner when necessary.
+// Failure to retrieve notification details must not prevent
+// the underlying loan operation from proceeding.
+const getApplicationOwnerSafely = async (id) => {
+  try {
+    const application =
+      await LoanService.getApplicationById(id);
+
+    return getLoanOwnerId(application);
+  } catch (error) {
+    console.error(
+      "NOTIFICATION OWNER LOOKUP ERROR:",
+      error.message,
+    );
+
+    return null;
+  }
 };
 
 // =========================================================
@@ -212,6 +263,15 @@ const createLoanApplication = async (
         req.body,
       );
 
+      // Notify the applicant after successful creation.
+if (application?._id) {
+  sendLoanNotification(
+    NotificationService.notifyLoanApplication({
+      userId,
+      loanId: application._id,
+    }),
+  );
+}
     return res.status(201).json({
       success: true,
       message:
@@ -681,34 +741,33 @@ const getAllLoanApplications = async (
 // GET SINGLE LOAN APPLICATION - ADMIN
 // =========================================================
 
-const getLoanApplication = async (
-  req,
-  res,
-  next,
-) => {
+const getLoanApplication = async (req, res, next) => {
   try {
     const { id } = req.params;
 
     if (!id) {
       return res.status(400).json({
         success: false,
-        message:
-          "Loan application ID is required",
+        message: "Loan application ID is required",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid loan application ID",
+        message: "Invalid loan application ID",
       });
     }
 
     const application =
-      await LoanService.getApplicationById(
-        id,
-      );
+      await LoanService.getApplicationById(id);
+
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: "Loan application not found",
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -745,44 +804,77 @@ const updateLoanApplicationStatus = async (
       rejectionReason,
     } = req.body || {};
 
+    // Validate admin authentication
     if (!adminId) {
       return res.status(401).json({
         success: false,
-        message:
-          "Authenticated admin is required",
+        message: "Authenticated admin is required",
       });
     }
 
+    // Validate application ID
     if (!id) {
       return res.status(400).json({
         success: false,
-        message:
-          "Loan application ID is required",
+        message: "Loan application ID is required",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid loan application ID",
+        message: "Invalid loan application ID",
       });
     }
 
+    // Validate status
     if (
       !status ||
-      typeof status !== "string"
+      typeof status !== "string" ||
+      !status.trim()
     ) {
       return res.status(400).json({
         success: false,
-        message:
-          "Loan application status must be a string",
+        message: "Loan application status must be a string",
       });
     }
 
-    const normalizedStatus =
-      status.trim();
+    const normalizedStatus = status.trim();
 
+    // Resolve the applicant before updating the application.
+    // This supports service results that do not include the owner.
+    let applicantId = null;
+
+    try {
+      const existingApplication =
+        await LoanService.getApplicationById(id);
+
+      if (!existingApplication) {
+        return res.status(404).json({
+          success: false,
+          message: "Loan application not found",
+        });
+      }
+
+      const owner =
+        existingApplication.user ||
+        existingApplication.applicant ||
+        existingApplication.borrower ||
+        existingApplication.customer ||
+        existingApplication.userId;
+
+      applicantId =
+        owner && typeof owner === "object"
+          ? owner._id || owner.id || null
+          : owner || null;
+    } catch (lookupError) {
+      console.error(
+        "LOAN APPLICANT LOOKUP ERROR:",
+        lookupError.message,
+      );
+    }
+
+    // Update the application
     const application =
       await LoanService.updateApplicationStatus(
         id,
@@ -791,13 +883,50 @@ const updateLoanApplicationStatus = async (
         rejectionReason,
       );
 
+    // Prefer the owner returned by the updated application.
+    const returnedOwner =
+      application?.user ||
+      application?.applicant ||
+      application?.borrower ||
+      application?.customer ||
+      application?.userId;
+
+    if (returnedOwner) {
+      applicantId =
+        typeof returnedOwner === "object"
+          ? returnedOwner._id || returnedOwner.id || applicantId
+          : returnedOwner;
+    }
+
+    // Send notification without affecting the successful update.
+    if (applicantId) {
+      Promise.resolve()
+        .then(() =>
+          NotificationService.notifyLoanStatus({
+            userId: applicantId,
+            loanId: application?._id || id,
+            status: application?.status || normalizedStatus,
+            rejectionReason,
+          }),
+        )
+        .catch((notificationError) => {
+          console.error(
+            "LOAN STATUS NOTIFICATION ERROR:",
+            notificationError.message,
+          );
+        });
+    } else {
+      console.error(
+        "Loan status updated, but applicant ID could not be resolved.",
+      );
+    }
+
     return res.status(200).json({
       success: true,
-      message:
-        `Loan application ${normalizedStatus.replace(
-          /_/g,
-          " ",
-        )} successfully`,
+      message: `Loan application ${normalizedStatus.replace(
+        /_/g,
+        " ",
+      )} successfully`,
       data: application,
     });
   } catch (error) {
@@ -832,11 +961,7 @@ const updateLoanApplicationStatus = async (
 //
 // =========================================================
 
-const completeLoanApplication = async (
-  req,
-  res,
-  next,
-) => {
+const completeLoanApplication = async (req, res, next) => {
   try {
     const adminId = getAuthenticatedUserId(req);
     const { id } = req.params;
@@ -844,37 +969,85 @@ const completeLoanApplication = async (
     if (!adminId) {
       return res.status(401).json({
         success: false,
-        message:
-          "Authenticated admin is required",
+        message: "Authenticated admin is required",
       });
     }
 
     if (!id) {
       return res.status(400).json({
         success: false,
-        message:
-          "Loan application ID is required",
+        message: "Loan application ID is required",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid loan application ID",
+        message: "Invalid loan application ID",
       });
     }
 
-    const application =
-      await LoanService.completeApplication(
-        id,
-        adminId,
+    // Get the application first so we can identify the borrower.
+    let existingApplication = null;
+
+    try {
+      existingApplication =
+        await LoanService.getApplicationById(id);
+    } catch (lookupError) {
+      console.error(
+        "COMPLETE LOAN APPLICATION LOOKUP ERROR:",
+        lookupError.message,
       );
+    }
+
+    const application =
+      await LoanService.completeApplication(id, adminId);
+
+    // Resolve the borrower ID from the returned or existing application.
+    const borrower =
+      application?.user ||
+      application?.applicant ||
+      application?.borrower ||
+      application?.customer ||
+      application?.userId ||
+      existingApplication?.user ||
+      existingApplication?.applicant ||
+      existingApplication?.borrower ||
+      existingApplication?.customer ||
+      existingApplication?.userId;
+
+    const borrowerId =
+      borrower?._id || borrower?.id || borrower;
+
+    if (borrowerId) {
+      // Do not delay or fail the successful API response because
+      // notification delivery failed.
+      void NotificationService.notify({
+        user: borrowerId,
+        recipientRole: "user",
+        type: "loan_status",
+        title: "Loan Application Completed",
+        message:
+          "Your loan application has been marked as completed.",
+        relatedLoan: application?._id || id,
+        metadata: {
+          status: application?.status || "completed",
+        },
+      }).catch((notificationError) => {
+        console.error(
+          "LOAN COMPLETION NOTIFICATION ERROR:",
+          notificationError.message,
+        );
+      });
+    } else {
+      console.warn(
+        "Loan application completed, but borrower ID could not be resolved. Notification skipped.",
+      );
+    }
 
     return res.status(200).json({
       success: true,
-      message:
-        "Loan application completed successfully",
+      message: "Loan application completed successfully",
       data: application,
     });
   } catch (error) {
@@ -895,11 +1068,7 @@ const completeLoanApplication = async (
 // DISBURSE LOAN APPLICATION - ADMIN
 // =========================================================
 
-const disburseLoanApplication = async (
-  req,
-  res,
-  next,
-) => {
+const disburseLoanApplication = async (req, res, next) => {
   try {
     const adminId = getAuthenticatedUserId(req);
     const { id } = req.params;
@@ -907,37 +1076,78 @@ const disburseLoanApplication = async (
     if (!adminId) {
       return res.status(401).json({
         success: false,
-        message:
-          "Authenticated admin is required",
+        message: "Authenticated admin is required",
       });
     }
 
     if (!id) {
       return res.status(400).json({
         success: false,
-        message:
-          "Loan application ID is required",
+        message: "Loan application ID is required",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid loan application ID",
+        message: "Invalid loan application ID",
       });
     }
 
-    const application =
-      await LoanService.disburseApplication(
-        id,
-        adminId,
+    // Get the application so we can identify the borrower.
+    let existingApplication = null;
+
+    try {
+      existingApplication =
+        await LoanService.getApplicationById(id);
+    } catch (lookupError) {
+      console.error(
+        "DISBURSE LOAN APPLICATION LOOKUP ERROR:",
+        lookupError.message,
       );
+    }
+
+    // Disburse the loan.
+    const application =
+      await LoanService.disburseApplication(id, adminId);
+
+    // Resolve the borrower from the returned or existing application.
+    const borrower =
+      application?.user ||
+      application?.applicant ||
+      application?.borrower ||
+      application?.customer ||
+      application?.userId ||
+      existingApplication?.user ||
+      existingApplication?.applicant ||
+      existingApplication?.borrower ||
+      existingApplication?.customer ||
+      existingApplication?.userId;
+
+    const borrowerId =
+      borrower?._id || borrower?.id || borrower;
+
+    if (borrowerId) {
+      // Notify asynchronously; notification failure must not undo
+      // or fail a successful disbursement.
+      void NotificationService.notifyLoanDisbursed({
+        userId: borrowerId,
+        loanId: application?._id || id,
+      }).catch((notificationError) => {
+        console.error(
+          "LOAN DISBURSEMENT NOTIFICATION ERROR:",
+          notificationError.message,
+        );
+      });
+    } else {
+      console.warn(
+        "Loan disbursed, but borrower ID could not be resolved. Notification skipped.",
+      );
+    }
 
     return res.status(200).json({
       success: true,
-      message:
-        "Loan application disbursed successfully",
+      message: "Loan application disbursed successfully",
       data: application,
     });
   } catch (error) {

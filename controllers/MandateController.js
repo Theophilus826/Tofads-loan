@@ -54,39 +54,47 @@ const requireParam = (req, res, param, message) => {
 const createMandate = async (req, res, next) => {
   try {
     const userId = requireAuth(req, res);
-
-    if (!userId) {
-      return;
-    }
+    if (!userId) return;
 
     const offerId = requireParam(
       req,
       res,
       "offerId",
-      "Loan offer ID is required"
+      "Loan offer ID is required",
     );
+    if (!offerId) return;
 
-    if (!offerId) {
-      return;
+    // Reuse an active mandate for this offer.
+    const mandates = await MandateService.listUserMandates(userId);
+
+    const existingActiveMandate = mandates.find((item) => {
+      const itemOfferId = item.loanOffer?._id || item.loanOffer;
+
+      return (
+        String(itemOfferId) === String(offerId) && item.status === "active"
+      );
+    });
+
+    if (existingActiveMandate) {
+      return res.status(200).json({
+        success: true,
+        message: "Existing active mandate reused.",
+        data: existingActiveMandate,
+        reused: true,
+      });
     }
 
-    const mandate = await MandateService.create(
-      userId,
-      offerId
-    );
+    // No active mandate exists: initialize a new one.
+    const mandate = await MandateService.create(userId, offerId);
 
     return res.status(201).json({
       success: true,
-      message:
-        "Card authorization initialized successfully",
+      message: "Card authorization initialized successfully",
       data: mandate,
+      reused: false,
     });
   } catch (error) {
-    console.error(
-      "CREATE MANDATE ERROR:",
-      error
-    );
-
+    console.error("CREATE MANDATE ERROR:", error);
     next(error);
   }
 };
@@ -108,12 +116,7 @@ const getMandate = async (req, res, next) => {
       return;
     }
 
-    const mandateId = requireParam(
-      req,
-      res,
-      "id",
-      "Mandate ID is required"
-    );
+    const mandateId = requireParam(req, res, "id", "Mandate ID is required");
 
     if (!mandateId) {
       return;
@@ -127,11 +130,10 @@ const getMandate = async (req, res, next) => {
      * while enforcing ownership here.
      */
 
-    const mandate =
-      await MandateService.getUserMandatesById?.(
-        userId,
-        mandateId
-      );
+    const mandate = await MandateService.getUserMandatesById?.(
+      userId,
+      mandateId,
+    );
 
     if (!mandate) {
       return res.status(404).json({
@@ -142,15 +144,11 @@ const getMandate = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      message:
-        "Mandate retrieved successfully",
+      message: "Mandate retrieved successfully",
       data: mandate,
     });
   } catch (error) {
-    console.error(
-      "GET MANDATE ERROR:",
-      error
-    );
+    console.error("GET MANDATE ERROR:", error);
 
     next(error);
   }
@@ -171,11 +169,7 @@ const getMandate = async (req, res, next) => {
 //
 // =========================================================
 
-const getMandateByReference = async (
-  req,
-  res,
-  next
-) => {
+const getMandateByReference = async (req, res, next) => {
   try {
     const userId = requireAuth(req, res);
 
@@ -187,17 +181,14 @@ const getMandateByReference = async (
       req,
       res,
       "reference",
-      "Mandate reference is required"
+      "Mandate reference is required",
     );
 
     if (!reference) {
       return;
     }
 
-    const mandate =
-      await MandateService.getByReference(
-        reference
-      );
+    const mandate = await MandateService.getByReference(reference);
 
     if (!mandate) {
       return res.status(404).json({
@@ -210,32 +201,22 @@ const getMandateByReference = async (
     // Ownership protection
     // ---------------------------------------------------
 
-    const mandateUserId =
-      mandate.user?._id ||
-      mandate.user;
+    const mandateUserId = mandate.user?._id || mandate.user;
 
-    if (
-      String(mandateUserId) !==
-      String(userId)
-    ) {
+    if (String(mandateUserId) !== String(userId)) {
       return res.status(403).json({
         success: false,
-        message:
-          "You are not authorized to access this mandate",
+        message: "You are not authorized to access this mandate",
       });
     }
 
     return res.status(200).json({
       success: true,
-      message:
-        "Mandate retrieved successfully",
+      message: "Mandate retrieved successfully",
       data: mandate,
     });
   } catch (error) {
-    console.error(
-      "GET MANDATE BY REFERENCE ERROR:",
-      error
-    );
+    console.error("GET MANDATE BY REFERENCE ERROR:", error);
 
     next(error);
   }
@@ -254,11 +235,7 @@ const getMandateByReference = async (
 //
 // =========================================================
 
-const getActiveMandateForOffer = async (
-  req,
-  res,
-  next
-) => {
+const getActiveMandateForOffer = async (req, res, next) => {
   try {
     const userId = requireAuth(req, res);
 
@@ -270,53 +247,39 @@ const getActiveMandateForOffer = async (
       req,
       res,
       "offerId",
-      "Loan offer ID is required"
+      "Loan offer ID is required",
     );
 
     if (!offerId) {
       return;
     }
 
-    const mandates =
-      await MandateService.listUserMandates(
-        userId
-      );
+    const mandates = await MandateService.listUserMandates(userId);
 
     const mandate =
       mandates.find((item) => {
-        const itemOfferId =
-          item.loanOffer?._id ||
-          item.loanOffer;
+        const itemOfferId = item.loanOffer?._id || item.loanOffer;
 
         return (
-          String(itemOfferId) ===
-            String(offerId) &&
-          ["active", "authorized"].includes(
-            item.status
-          )
+          String(itemOfferId) === String(offerId) && item.status === "active"
         );
       }) || null;
 
     if (!mandate) {
       return res.status(200).json({
         success: true,
-        message:
-          "No active mandate found",
+        message: "No active mandate found",
         data: null,
       });
     }
 
     return res.status(200).json({
       success: true,
-      message:
-        "Active mandate retrieved successfully",
+      message: "Active mandate retrieved successfully",
       data: mandate,
     });
   } catch (error) {
-    console.error(
-      "GET ACTIVE MANDATE ERROR:",
-      error
-    );
+    console.error("GET ACTIVE MANDATE ERROR:", error);
 
     next(error);
   }
@@ -343,11 +306,7 @@ const getActiveMandateForOffer = async (
 //
 // =========================================================
 
-const refreshStatus = async (
-  req,
-  res,
-  next
-) => {
+const refreshStatus = async (req, res, next) => {
   try {
     const userId = requireAuth(req, res);
 
@@ -355,12 +314,7 @@ const refreshStatus = async (
       return;
     }
 
-    const mandateId = requireParam(
-      req,
-      res,
-      "id",
-      "Mandate ID is required"
-    );
+    const mandateId = requireParam(req, res, "id", "Mandate ID is required");
 
     if (!mandateId) {
       return;
@@ -371,17 +325,11 @@ const refreshStatus = async (
      * enforce ownership before asking Paystack to verify.
      */
 
-    const mandates =
-      await MandateService.listUserMandates(
-        userId
-      );
+    const mandates = await MandateService.listUserMandates(userId);
 
-    const mandate =
-      mandates.find(
-        (item) =>
-          String(item._id) ===
-          String(mandateId)
-      );
+    const mandate = mandates.find(
+      (item) => String(item._id) === String(mandateId),
+    );
 
     if (!mandate) {
       return res.status(404).json({
@@ -390,33 +338,24 @@ const refreshStatus = async (
       });
     }
 
-    const reference =
-      mandate.mandateReference;
+    const reference = mandate.mandateReference;
 
     if (!reference) {
       return res.status(400).json({
         success: false,
-        message:
-          "Mandate reference is missing",
+        message: "Mandate reference is missing",
       });
     }
 
-    const refreshed =
-      await MandateService.refreshStatus(
-        reference
-      );
+    const refreshed = await MandateService.refreshStatus(reference);
 
     return res.status(200).json({
       success: true,
-      message:
-        "Mandate status refreshed successfully",
+      message: "Mandate status refreshed successfully",
       data: refreshed,
     });
   } catch (error) {
-    console.error(
-      "REFRESH MANDATE STATUS ERROR:",
-      error
-    );
+    console.error("REFRESH MANDATE STATUS ERROR:", error);
 
     next(error);
   }
@@ -434,11 +373,7 @@ const refreshStatus = async (
 //
 // =========================================================
 
-const cancelMandate = async (
-  req,
-  res,
-  next
-) => {
+const cancelMandate = async (req, res, next) => {
   try {
     const userId = requireAuth(req, res);
 
@@ -446,12 +381,7 @@ const cancelMandate = async (
       return;
     }
 
-    const mandateId = requireParam(
-      req,
-      res,
-      "id",
-      "Mandate ID is required"
-    );
+    const mandateId = requireParam(req, res, "id", "Mandate ID is required");
 
     if (!mandateId) {
       return;
@@ -459,14 +389,10 @@ const cancelMandate = async (
 
     return res.status(403).json({
       success: false,
-      message:
-        "Customer cancellation of repayment mandates is not permitted",
+      message: "Customer cancellation of repayment mandates is not permitted",
     });
   } catch (error) {
-    console.error(
-      "CANCEL MANDATE ERROR:",
-      error
-    );
+    console.error("CANCEL MANDATE ERROR:", error);
 
     next(error);
   }
@@ -490,29 +416,18 @@ const cancelMandate = async (
 //
 // =========================================================
 
-const getAllMandates = async (
-  req,
-  res,
-  next
-) => {
+const getAllMandates = async (req, res, next) => {
   try {
-    const mandates =
-      await MandateService.listAll();
+    const mandates = await MandateService.listAll();
 
     return res.status(200).json({
       success: true,
-      message:
-        "Mandates retrieved successfully",
-      count: Array.isArray(mandates)
-        ? mandates.length
-        : 0,
+      message: "Mandates retrieved successfully",
+      count: Array.isArray(mandates) ? mandates.length : 0,
       data: mandates,
     });
   } catch (error) {
-    console.error(
-      "GET ALL MANDATES ERROR:",
-      error
-    );
+    console.error("GET ALL MANDATES ERROR:", error);
 
     next(error);
   }

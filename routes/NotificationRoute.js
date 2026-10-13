@@ -1,45 +1,27 @@
 const express = require("express");
 const router = express.Router();
-const { protect } = require("../middleware/AuthMiddleware");
 
+const { protect } = require("../middleware/authMiddleware");
 const {
-  sendNotification,
-  sendNotificationToAll,
-  getUserNotifications,
-  markAsRead,
+  getMyNotifications,
+  getUnreadCount,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
   deleteNotification,
-  streamNotifications, // ✅ NEW
-   saveFcmToken, // ✅ NEW
 } = require("../controllers/NotificationController");
 
-/* ==========================
-   SSE (MUST BE FIRST)
-========================== */
+const {
+  subscribeNotifications,
+} = require("../config/sse");
 
-// 🔔 Real-time notifications stream
-router.get("/stream", protect, streamNotifications);
+// Real-time stream
+router.get("/stream", protect, subscribeNotifications);
 
-/* ==========================
-   REST ROUTES
-========================== */
-
-// Get user notifications
-router.get("/", protect, getUserNotifications);
-
-// Send single notification
-router.post("/", protect, sendNotification);
-
-// Broadcast to all users
-router.post("/broadcast", protect, sendNotificationToAll);
-
-// Mark as read
-router.put("/:id/read", protect, markAsRead);
-
-// Delete notification
+// Notification API
+router.get("/unread-count", protect, getUnreadCount);
+router.get("/", protect, getMyNotifications);
+router.patch("/read-all", protect, markAllNotificationsAsRead);
+router.patch("/:id/read", protect, markNotificationAsRead);
 router.delete("/:id", protect, deleteNotification);
-
-// Save FCM token
-router.post("/fcm-token", protect, saveFcmToken);
-
 
 module.exports = router;

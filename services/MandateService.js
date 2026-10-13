@@ -460,67 +460,45 @@ class MandateService {
     }
 
     // ==================================================
-    // EXISTING MANDATE
+    // EXISTING ACTIVE MANDATE
     // ==================================================
 
-    let existingMandate;
+    let existingActiveMandate;
 
     try {
-      existingMandate = await MandateModel.findOne({
+      existingActiveMandate = await MandateModel.findOne({
         user: userId,
         loanOffer: offerId,
+        status: "active",
       }).sort({
         createdAt: -1,
       });
     } catch (error) {
       throw serverError(
         "MANDATE_LOOKUP_FAILED",
-        "Unable to check existing mandate",
+        "Unable to check for an existing active mandate",
         {
           originalError: error.message,
         },
       );
     }
 
-    if (existingMandate) {
-      // -----------------------------------------------
-      // ALREADY ACTIVE
-      // -----------------------------------------------
+    // Reuse an active mandate instead of creating a duplicate.
+    if (existingActiveMandate) {
+      console.log(
+        "MANDATE: Reusing active mandate:",
+        existingActiveMandate._id,
+      );
 
-      if (ACTIVE_STATUSES.includes(existingMandate.status)) {
-        return existingMandate;
-      }
-
-      // -----------------------------------------------
-      // ALREADY PROCESSING
-      // -----------------------------------------------
-
-      if (
-        ["pending", "authorization_required", "authorized"].includes(
-          existingMandate.status,
-        )
-      ) {
-        return existingMandate;
-      }
-
-      // -----------------------------------------------
-      // TERMINAL AND NOT RETRYABLE
-      // -----------------------------------------------
-
-      if (
-        TERMINAL_STATUSES.includes(existingMandate.status) &&
-        !RETRYABLE_STATUSES.includes(existingMandate.status)
-      ) {
-        throw conflict(
-          "MANDATE_RECREATION_NOT_ALLOWED",
-          `Mandate cannot be recreated while status is ${existingMandate.status}`,
-          {
-            mandateId: existingMandate._id,
-            status: existingMandate.status,
-          },
-        );
-      }
+      return existingActiveMandate;
     }
+
+    // No active mandate exists for this offer.
+    // Continue below to create a new mandate.
+    console.log(
+      "MANDATE: No active mandate found; creating a new mandate for offer:",
+      offerId,
+    );
 
     // ==================================================
     // FIND LOAN APPLICATION

@@ -1,545 +1,277 @@
 
 const mongoose = require("mongoose");
-const jwt = require("jsonwebtoken");
-
 const Notification = require("../model/Notification");
-const User = require("../model/UserModel");
 
-const { notify } = require("../config/NotificationService");
+/* =========================================================
+   HELPERS
+========================================================= */
 
-const {
-  addNotificationClient,
-  removeNotificationClient,
-} = require("../config/sse");
+const getAuthenticatedUserId = (req) =>
+  req.user?._id || req.user?.id || null;
 
-// =========================================================
-// HELPERS
-// =========================================================
+const isValidObjectId = (id) =>
+  Boolean(id && mongoose.Types.ObjectId.isValid(String(id)));
 
-const isValidId = (id) => {
-  return id && mongoose.Types.ObjectId.isValid(id);
-};
+const getRecipientRole = (req) =>
+  req.user?.role === "admin" ? "admin" : "user";
 
-// =========================================================
-// SEND NOTIFICATION
-// ADMIN / API
-// =========================================================
+/* =========================================================
+   GET MY NOTIFICATIONS
+   GET /api/notifications
+========================================================= */
 
-const sendNotification = async (req, res) => {
+exports.getMyNotifications = async (req, res) => {
   try {
-    const {
-      userId,
-      message,
-      type = "system",
-      postId = null,
-      orderId = null,
-    } = req.body;
+    const userId = getAuthenticatedUserId(req);
 
-    // ==========================================
-    // VALIDATE USER
-    // ==========================================
-
-    if (!userId || !isValidId(userId)) {
-      return res.status(400).json({
+    if (!isValidObjectId(userId)) {
+      return res.status(401).json({
         success: false,
-        message: "Valid userId required",
+        message: "Authentication required.",
       });
     }
 
-    const user = await User.findById(userId);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    // ==========================================
-    // VALIDATE ORDER ID
-    // ==========================================
-
-    if (orderId && !isValidId(orderId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid orderId",
-      });
-    }
-
-    // ==========================================
-    // VALIDATE POST ID
-    // ==========================================
-
-    if (postId && !isValidId(postId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid postId",
-      });
-    }
-
-    // ==========================================
-    // CREATE NOTIFICATION
-    // ==========================================
-
-    const notification = await notify({
-      user: user._id,
-      sender: req.user,
-      type,
-      message,
-      postId,
-      orderId,
-    });
-
-    return res.status(201).json({
-      success: true,
-      notification,
-    });
-  } catch (err) {
-    console.error(
-      "SEND ERROR:",
-      err.message,
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(
+      100,
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 20)
     );
 
-    return res.status(500).json({
-      success: false,
-      message: err.message,
-    });
-  }
-};
+    const filter = {
+      user: userId,
+      recipientRole: getRecipientRole(req),
+    };
 
-// =========================================================
-// SEND TO ALL USERS
-// =========================================================
-
-const sendNotificationToAll = async (
-  req,
-  res,
-) => {
-  try {
-    const {
-      message,
-      type = "system",
-    } = req.body;
-
-    if (!message?.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Message required",
-      });
+    if (req.query.unread === "true") {
+      filter.isRead = false;
     }
 
-    const users =
-      await User.find({}, "_id");
+    const [notifications, total, unreadCount] = await Promise.all([
+      Notification.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
 
-    await Promise.all(
-      users.map((user) =>
-        notify({
-          user: user._id,
-          sender: req.user,
-          type,
-          message: message.trim(),
-        }),
-      ),
-    );
+      Notification.countDocuments(filter),
 
-    return res.json({
-      success: true,
-      message: `Sent to ${users.length} users`,
-    });
-  } catch (err) {
-    console.error(
-      "SEND ALL ERROR:",
-      err.message,
-    );
+      Notification.countDocuments({
+        user: userId,
+        recipientRole: getRecipientRole(req),
+        isRead: false,
+      }),
+    ]);
 
-    return res.status(500).json({
-      success: false,
-      message: err.message,
-    });
-  }
-};
-
-// =========================================================
-// GET USER NOTIFICATIONS
-// =========================================================
-
-const getUserNotifications = async (
-  req,
-  res,
-) => {
-  try {
-    const notifications =
-      await Notification.find({
-        user: req.user._id,
-      })
-        .populate(
-          "sender",
-          "name image",
-        )
-        .populate(
-          "orderId",
-          "_id status total createdAt",
-        )
-        .sort({
-          createdAt: -1,
-        });
-
-    return res.json({
+    return res.status(200).json({
       success: true,
       notifications,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+      unreadCount,
     });
-  } catch (err) {
-    console.error(
-      "GET NOTIFICATIONS ERROR:",
-      err.message,
-    );
+  } catch (error) {
+    console.error("Get notifications error:", error);
 
     return res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Failed to retrieve notifications.",
     });
   }
 };
 
-// =========================================================
-// MARK AS READ
-// =========================================================
+/* =========================================================
+   GET UNREAD NOTIFICATION COUNT
+   GET /api/notifications/unread-count
+========================================================= */
 
-const markAsRead = async (
-  req,
-  res,
-) => {
+exports.getUnreadCount = async (req, res) => {
   try {
-    const { id } = req.params;
+    const userId = getAuthenticatedUserId(req);
 
-    if (!isValidId(id)) {
-      return res.status(400).json({
+    if (!isValidObjectId(userId)) {
+      return res.status(401).json({
         success: false,
-        message: "Invalid ID",
+        message: "Authentication required.",
       });
     }
 
-    const notification =
-      await Notification.findOneAndUpdate(
-        {
-          _id: id,
-          user: req.user._id,
+    const unreadCount = await Notification.countDocuments({
+      user: userId,
+      recipientRole: getRecipientRole(req),
+      isRead: false,
+    });
+
+    return res.status(200).json({
+      success: true,
+      unreadCount,
+    });
+  } catch (error) {
+    console.error("Get unread count error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retrieve unread count.",
+    });
+  }
+};
+
+/* =========================================================
+   MARK ONE NOTIFICATION AS READ
+   PATCH /api/notifications/:id/read
+========================================================= */
+
+exports.markNotificationAsRead = async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    const { id } = req.params;
+
+    if (!isValidObjectId(userId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid notification ID.",
+      });
+    }
+
+    const notification = await Notification.findOneAndUpdate(
+      {
+        _id: id,
+        user: userId,
+        recipientRole: getRecipientRole(req),
+      },
+      {
+        $set: {
+          isRead: true,
+          readAt: new Date(),
         },
-        {
-          read: true,
-        },
-        {
-          returnDocument: "after",
-        },
-      );
+      },
+      { new: true, runValidators: true }
+    );
 
     if (!notification) {
       return res.status(404).json({
         success: false,
-        message:
-          "Notification not found",
+        message: "Notification not found.",
       });
     }
 
-    return res.json({
+    return res.status(200).json({
       success: true,
+      message: "Notification marked as read.",
       notification,
     });
-  } catch (err) {
-    console.error(
-      "MARK READ ERROR:",
-      err.message,
-    );
+  } catch (error) {
+    console.error("Mark notification as read error:", error);
 
     return res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Failed to update notification.",
     });
   }
 };
 
-// =========================================================
-// DELETE NOTIFICATION
-// =========================================================
+/* =========================================================
+   MARK ALL NOTIFICATIONS AS READ
+   PATCH /api/notifications/read-all
+========================================================= */
 
-const deleteNotification = async (
-  req,
-  res,
-) => {
+exports.markAllNotificationsAsRead = async (req, res) => {
   try {
-    const { id } = req.params;
+    const userId = getAuthenticatedUserId(req);
 
-    if (!isValidId(id)) {
-      return res.status(400).json({
+    if (!isValidObjectId(userId)) {
+      return res.status(401).json({
         success: false,
-        message: "Invalid ID",
+        message: "Authentication required.",
       });
     }
 
-    const notification =
-      await Notification.findOneAndDelete({
-        _id: id,
-        user: req.user._id,
+    const result = await Notification.updateMany(
+      {
+        user: userId,
+        recipientRole: getRecipientRole(req),
+        isRead: false,
+      },
+      {
+        $set: {
+          isRead: true,
+          readAt: new Date(),
+        },
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "All notifications marked as read.",
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    console.error("Mark all notifications as read error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update notifications.",
+    });
+  }
+};
+
+/* =========================================================
+   DELETE ONE NOTIFICATION
+   DELETE /api/notifications/:id
+========================================================= */
+
+exports.deleteNotification = async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    const { id } = req.params;
+
+    if (!isValidObjectId(userId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
       });
+    }
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid notification ID.",
+      });
+    }
+
+    const notification = await Notification.findOneAndDelete({
+      _id: id,
+      user: userId,
+      recipientRole: getRecipientRole(req),
+    });
 
     if (!notification) {
       return res.status(404).json({
         success: false,
-        message:
-          "Notification not found",
+        message: "Notification not found.",
       });
     }
 
-    return res.json({
+    return res.status(200).json({
       success: true,
-      message:
-        "Deleted successfully",
+      message: "Notification deleted successfully.",
     });
-  } catch (err) {
-    console.error(
-      "DELETE NOTIFICATION ERROR:",
-      err.message,
-    );
+  } catch (error) {
+    console.error("Delete notification error:", error);
 
     return res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Failed to delete notification.",
     });
   }
 };
-
-// =========================================================
-// SSE NOTIFICATION STREAM
-// =========================================================
-
-const streamNotifications = async (
-  req,
-  res,
-) => {
-  try {
-    const token = req.query.token;
-
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: "No token provided",
-      });
-    }
-
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET,
-    );
-
-    const user =
-      await User.findById(
-        decoded.id,
-      ).select("_id");
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const userId =
-      user._id.toString();
-
-    // ==========================================
-    // SSE HEADERS
-    // ==========================================
-
-    res.setHeader(
-      "Content-Type",
-      "text/event-stream",
-    );
-
-    res.setHeader(
-      "Cache-Control",
-      "no-cache, no-transform",
-    );
-
-    res.setHeader(
-      "Connection",
-      "keep-alive",
-    );
-
-    res.setHeader(
-      "X-Accel-Buffering",
-      "no",
-    );
-
-    res.flushHeaders?.();
-
-    // ==========================================
-    // REGISTER CLIENT
-    // ==========================================
-
-    addNotificationClient(
-      userId,
-      res,
-    );
-
-    // ==========================================
-    // INITIAL EVENT
-    // ==========================================
-
-    res.write(
-      `data: ${JSON.stringify({
-        type: "connected",
-        scope: "notification",
-      })}\n\n`,
-    );
-
-    // ==========================================
-    // KEEP ALIVE
-    // ==========================================
-
-    const keepAlive =
-      setInterval(() => {
-        if (
-          res.writableEnded ||
-          res.destroyed
-        ) {
-          return;
-        }
-
-        try {
-          res.write(
-            `data: ${JSON.stringify({
-              type: "ping",
-              scope: "notification",
-            })}\n\n`,
-          );
-        } catch (err) {
-          console.error(
-            "SSE KEEPALIVE ERROR:",
-            err.message,
-          );
-        }
-      }, 25000);
-
-    // ==========================================
-    // DISCONNECT
-    // ==========================================
-
-    req.on("close", () => {
-      clearInterval(
-        keepAlive,
-      );
-
-      removeNotificationClient(
-        userId,
-        res,
-      );
-
-      if (!res.writableEnded) {
-        res.end();
-      }
-    });
-  } catch (err) {
-    console.error(
-      "SSE ERROR:",
-      err.message,
-    );
-
-    if (!res.headersSent) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid token",
-      });
-    }
-
-    res.end();
-  }
-};
-
-// =========================================================
-// SAVE FCM TOKEN
-// =========================================================
-
-const saveFcmToken = async (
-  req,
-  res,
-) => {
-  try {
-    const userId =
-      req.user._id;
-
-    const {
-      fcmToken,
-    } = req.body;
-
-    if (!fcmToken?.trim()) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "FCM token is required",
-      });
-    }
-
-    const user =
-      await User.findById(
-        userId,
-      );
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    // ==========================================
-    // AVOID UNNECESSARY DB WRITE
-    // ==========================================
-
-    if (
-      user.fcmToken ===
-      fcmToken.trim()
-    ) {
-      return res.json({
-        success: true,
-        message:
-          "FCM token already saved",
-      });
-    }
-
-    user.fcmToken =
-      fcmToken.trim();
-
-    await user.save();
-
-    return res.json({
-      success: true,
-      message:
-        "FCM token saved successfully",
-    });
-  } catch (err) {
-    console.error(
-      "SAVE FCM ERROR:",
-      err.message,
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: err.message,
-    });
-  }
-};
-
-// =========================================================
-// EXPORTS
-// =========================================================
-
-module.exports = {
-  sendNotification,
-  sendNotificationToAll,
-  getUserNotifications,
-  markAsRead,
-  deleteNotification,
-  streamNotifications,
-  saveFcmToken,
-};
-

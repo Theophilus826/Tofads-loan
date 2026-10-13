@@ -282,14 +282,10 @@ const findLoansByUser = async (userId) => {
 // GET ACTIVE LOANS FOR CUSTOMER
 // =========================================================
 
-const findActiveLoansByUser = async (
-  userId,
-) => {
+const findActiveLoansByUser = async (userId) => {
   if (
     !userId ||
-    !mongoose.Types.ObjectId.isValid(
-      String(userId),
-    )
+    !mongoose.Types.ObjectId.isValid(String(userId))
   ) {
     return [];
   }
@@ -305,6 +301,18 @@ const findActiveLoansByUser = async (
         "defaulted",
       ],
     },
+    $or: [
+      // Loans waiting to be disbursed remain visible.
+      {
+        status: {
+          $in: ["pending_disbursement", "disbursing"],
+        },
+      },
+      // Repayment loans must have a positive balance.
+      {
+        outstandingAmount: { $gt: 0 },
+      },
+    ],
   })
     .populate(
       "loanProduct",

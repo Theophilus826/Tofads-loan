@@ -854,64 +854,82 @@ const getLoanDashboard = async (userId) => {
     throw createError("Authenticated user is required", 401);
   }
 
-  const [loans, activeLoans, applications] = await Promise.all([
-    LoanRepository.findLoansByUser(userId),
+  const [loans, repositoryActiveLoans, applications] =
+    await Promise.all([
+      LoanRepository.findLoansByUser(userId),
+      LoanRepository.findActiveLoansByUser(userId),
+      LoanRepository.findApplicationsByUser(userId),
+    ]);
 
-    LoanRepository.findActiveLoansByUser(userId),
+  // Preserve history, but exclude completed/cancelled loans
+  // from the current-loan dashboard.
+  const activeLoans = repositoryActiveLoans.filter((loan) => {
+    const status = String(loan.status || "").toLowerCase();
 
-    LoanRepository.findApplicationsByUser(userId),
-  ]);
+    if (["completed", "cancelled"].includes(status)) {
+      return false;
+    }
 
-  const totalLoans = loans.length;
+    // Hide loans with nothing left to repay, except loans
+    // that are still waiting for disbursement.
+    const outstanding = Number(loan.outstandingAmount || 0);
 
+    if (
+      outstanding <= 0 &&
+      !["pending_disbursement", "disbursing"].includes(status)
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+
+  // Use the current loan for the financial summary.
   const totalPrincipal = roundMoney(
-    loans.reduce((total, loan) => total + Number(loan.principalAmount || 0), 0),
-  );
-
-  const totalRepayment = roundMoney(
-    loans.reduce((total, loan) => total + Number(loan.totalRepayment || 0), 0),
+    activeLoans.reduce(
+      (total, loan) =>
+        total + Number(loan.principalAmount || 0),
+      0,
+    ),
   );
 
   const totalPaid = roundMoney(
-    loans.reduce((total, loan) => total + Number(loan.amountPaid || 0), 0),
+    activeLoans.reduce(
+      (total, loan) =>
+        total + Number(loan.amountPaid || 0),
+      0,
+    ),
   );
 
   const totalOutstanding = roundMoney(
-    loans.reduce(
-      (total, loan) => total + Number(loan.outstandingAmount || 0),
+    activeLoans.reduce(
+      (total, loan) =>
+        total + Number(loan.outstandingAmount || 0),
       0,
     ),
   );
 
-  const activeOutstanding = roundMoney(
-    activeLoans.reduce(
-      (total, loan) => total + Number(loan.outstandingAmount || 0),
-      0,
-    ),
-  );
+  const activeLoan = activeLoans[0] || null;
 
   return {
     summary: {
-      totalLoans,
-
+      totalLoans: loans.length,
       activeLoans: activeLoans.length,
 
+      // Current loan totals, not lifetime totals.
       totalBorrowed: totalPrincipal,
-
       totalPrincipal,
-
-      totalRepayment,
-
       totalPaid,
-
       totalOutstanding,
-
-      activeOutstanding,
+      activeOutstanding: totalOutstanding,
     },
 
+    // Preserve historical records for loan history.
     loans,
 
+    // Current loans only.
     activeLoans,
+    activeLoan,
 
     applications,
   };
