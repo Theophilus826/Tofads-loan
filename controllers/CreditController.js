@@ -33,6 +33,7 @@ const assessLoan = async (req, res, next) => {
     const result = await CreditService.assessLoan(
       userId,
       applicationId,
+      req.user.role === "admin"
     );
 
     console.log("CREDIT ASSESSMENT SUCCESS:", {

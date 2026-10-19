@@ -16,10 +16,15 @@ const {
 // ASSESS LOAN
 // =========================================================
 
-const assessLoan = async (userId, applicationId) => {
+const assessLoan = async (
+  userId,
+  applicationId,
+  isAdmin = false,
+) => {
   console.log("CREDIT SERVICE: Starting assessment", {
     userId,
     applicationId,
+    isAdmin,
   });
 
   // ==========================================
@@ -28,18 +33,21 @@ const assessLoan = async (userId, applicationId) => {
 
   console.log("CREDIT SERVICE: Finding application...");
 
-  const application =
-    await LoanRepository.findApplicationById(
-      applicationId,
-      userId,
-    );
+  const application = isAdmin
+    ? await LoanRepository.findApplicationByIdAdmin(
+        applicationId,
+      )
+    : await LoanRepository.findApplicationById(
+        applicationId,
+        userId,
+      );
 
   console.log(
     "CREDIT SERVICE: Application result:",
     application
       ? {
           id: application._id,
-          user: application.user,
+          user: application.user?._id || application.user,
           status: application.status,
         }
       : null,
@@ -51,14 +59,27 @@ const assessLoan = async (userId, applicationId) => {
     throw error;
   }
 
+  // Use the applicant's ID, not the admin's ID.
+  const applicantId =
+    application.user?._id || application.user;
+
+  if (!applicantId) {
+    const error = new Error(
+      "Loan application has no associated applicant",
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
   // ==========================================
   // GET KYC
   // ==========================================
 
-  console.log("CREDIT SERVICE: Loading KYC...");
+  console.log("CREDIT SERVICE: Loading applicant KYC...");
 
-  const kyc =
-    await KycRepository.findByUserId(userId);
+  const kyc = await KycRepository.findByUserId(
+    applicantId,
+  );
 
   console.log("CREDIT SERVICE: KYC loaded:", !!kyc);
 
@@ -66,10 +87,12 @@ const assessLoan = async (userId, applicationId) => {
   // GET BANK ACCOUNT
   // ==========================================
 
-  console.log("CREDIT SERVICE: Loading primary bank...");
+  console.log("CREDIT SERVICE: Loading applicant bank...");
 
   const bankAccount =
-    await BankAccountRepository.findPrimaryByUser(userId);
+    await BankAccountRepository.findPrimaryByUser(
+      applicantId,
+    );
 
   console.log(
     "CREDIT SERVICE: Bank account loaded:",
@@ -88,10 +111,7 @@ const assessLoan = async (userId, applicationId) => {
     application,
   });
 
-  console.log(
-    "CREDIT SERVICE: Rule result:",
-    ruleResult,
-  );
+  console.log("CREDIT SERVICE: Rule result:", ruleResult);
 
   // ==========================================
   // SCORE
@@ -106,18 +126,11 @@ const assessLoan = async (userId, applicationId) => {
     employmentStatus: application.employmentStatus,
   });
 
-  console.log(
-    "CREDIT SERVICE: Score result:",
-    scoreResult,
-  );
+  console.log("CREDIT SERVICE: Score result:", scoreResult);
 
-  const riskLevel =
-    getRiskLevel(scoreResult.score);
+  const riskLevel = getRiskLevel(scoreResult.score);
 
-  console.log(
-    "CREDIT SERVICE: Risk level:",
-    riskLevel,
-  );
+  console.log("CREDIT SERVICE: Risk level:", riskLevel);
 
   // ==========================================
   // DECISION
@@ -133,10 +146,7 @@ const assessLoan = async (userId, applicationId) => {
     decision = "manual_review";
   }
 
-  console.log(
-    "CREDIT SERVICE: Decision:",
-    decision,
-  );
+  console.log("CREDIT SERVICE: Decision:", decision);
 
   // ==========================================
   // REASONS
@@ -153,28 +163,27 @@ const assessLoan = async (userId, applicationId) => {
 
   console.log("CREDIT SERVICE: Creating assessment...");
 
-  const assessment =
-    await CreditRepository.create({
-      user: userId,
-      loanApplication: application._id,
+  const assessment = await CreditRepository.create({
+    // Record the applicant, not the admin performing the action.
+    user: applicantId,
+    loanApplication: application._id,
 
-      score: scoreResult.score,
-      riskLevel,
-      decision,
+    score: scoreResult.score,
+    riskLevel,
+    decision,
 
-      reasonCodes: reasons,
+    reasonCodes: reasons,
 
-      inputSnapshot: {
-        monthlyIncome: application.monthlyIncome,
-        amountRequested: application.amountRequested,
-        durationDays: application.durationDays,
-        employmentStatus: application.employmentStatus,
-      },
+    inputSnapshot: {
+      monthlyIncome: application.monthlyIncome,
+      amountRequested: application.amountRequested,
+      durationDays: application.durationDays,
+      employmentStatus: application.employmentStatus,
+    },
 
-      ruleResults: ruleResult,
-
-      assessedAt: new Date(),
-    });
+    ruleResults: ruleResult,
+    assessedAt: new Date(),
+  });
 
   console.log(
     "CREDIT SERVICE: Assessment created:",
@@ -226,10 +235,8 @@ const assessLoan = async (userId, applicationId) => {
       id: updatedApplication?._id,
       creditAssessment:
         updatedApplication?.creditAssessment,
-      creditScore:
-        updatedApplication?.creditScore,
-      creditDecision:
-        updatedApplication?.creditDecision,
+      creditScore: updatedApplication?.creditScore,
+      creditDecision: updatedApplication?.creditDecision,
     },
   );
 
@@ -262,17 +269,12 @@ const assessLoan = async (userId, applicationId) => {
         application.applicationNumber,
 
       status: applicationStatus,
-
-      creditScore:
-        scoreResult.score,
+      creditScore: scoreResult.score,
 
       creditDecision:
-        decision === "declined"
-          ? "rejected"
-          : decision,
+        decision === "declined" ? "rejected" : decision,
 
-      creditAssessment:
-        assessment._id,
+      creditAssessment: assessment._id,
     },
 
     decision,
@@ -281,6 +283,8 @@ const assessLoan = async (userId, applicationId) => {
     reasons,
   };
 };
+
+
 
 module.exports = {
   assessLoan,
