@@ -4,22 +4,63 @@ const router = express.Router();
 
 const AppVersion = require("../model/AppVersion");
 
-// GET /api/app-version/latest?currentVersionCode=1
+// GET /api/app-version/latest?currentVersionCode=0
 router.get("/latest", async (req, res) => {
+  console.log("\n====================================");
+  console.log("[APP VERSION] Request received");
+  console.log("[APP VERSION] Method:", req.method);
+  console.log("[APP VERSION] URL:", req.originalUrl);
+  console.log("[APP VERSION] Query:", req.query);
+  console.log("====================================");
+
   try {
-    const currentVersionCode = Number(
-      req.query.currentVersionCode
+    const rawVersionCode = req.query.currentVersionCode;
+
+    console.log(
+      "[APP VERSION] Raw currentVersionCode:",
+      rawVersionCode
+    );
+
+    if (
+      rawVersionCode === undefined ||
+      rawVersionCode === "" ||
+      Array.isArray(rawVersionCode)
+    ) {
+      console.warn(
+        "[APP VERSION] Missing or invalid currentVersionCode"
+      );
+
+      return res.status(400).json({
+        success: false,
+        message: "currentVersionCode is required",
+      });
+    }
+
+    const currentVersionCode = Number(rawVersionCode);
+
+    console.log(
+      "[APP VERSION] Parsed currentVersionCode:",
+      currentVersionCode
     );
 
     if (
       !Number.isSafeInteger(currentVersionCode) ||
-      currentVersionCode < 1
+      currentVersionCode < 0
     ) {
+      console.warn(
+        "[APP VERSION] currentVersionCode must be a non-negative integer"
+      );
+
       return res.status(400).json({
         success: false,
-        message: "Valid currentVersionCode is required",
+        message:
+          "currentVersionCode must be a non-negative integer",
       });
     }
+
+    console.log(
+      "[APP VERSION] Searching database for active version..."
+    );
 
     const latestVersion = await AppVersion.findOne({
       isActive: true,
@@ -30,7 +71,24 @@ router.get("/latest", async (req, res) => {
       )
       .lean();
 
+    console.log(
+      "[APP VERSION] Database result:",
+      latestVersion
+        ? {
+            version: latestVersion.version,
+            versionCode: latestVersion.versionCode,
+            isActive: latestVersion.isActive,
+            hasApkUrl: Boolean(latestVersion.apkUrl),
+            forceUpdate: latestVersion.forceUpdate,
+          }
+        : null
+    );
+
     if (!latestVersion) {
+      console.warn(
+        "[APP VERSION] No active app version found. Returning 404."
+      );
+
       return res.status(404).json({
         success: false,
         message: "No active app version found",
@@ -40,7 +98,20 @@ router.get("/latest", async (req, res) => {
     const updateAvailable =
       latestVersion.versionCode > currentVersionCode;
 
-    return res.status(200).json({
+    console.log(
+      "[APP VERSION] Update available:",
+      updateAvailable
+    );
+    console.log(
+      "[APP VERSION] Latest version code:",
+      latestVersion.versionCode
+    );
+    console.log(
+      "[APP VERSION] Client version code:",
+      currentVersionCode
+    );
+
+    const responseData = {
       success: true,
       updateAvailable,
       forceUpdate:
@@ -51,9 +122,17 @@ router.get("/latest", async (req, res) => {
       apkUrl: updateAvailable
         ? latestVersion.apkUrl
         : null,
+    };
+
+    console.log("[APP VERSION] Sending response:", {
+      ...responseData,
+      apkUrl: responseData.apkUrl ? "[APK URL present]" : null,
     });
+
+    return res.status(200).json(responseData);
   } catch (error) {
-    console.error("App version check error:", error);
+    console.error("[APP VERSION] ERROR:", error);
+    console.error("[APP VERSION] Stack:", error.stack);
 
     return res.status(500).json({
       success: false,

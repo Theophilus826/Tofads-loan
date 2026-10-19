@@ -28,24 +28,26 @@ const AppVersionSchema = new mongoose.Schema(
       required: true,
       trim: true,
       validate: {
-        validator: function (url) {
+        validator: function (value) {
           try {
-            const parsedUrl = new URL(url);
+            const parsedUrl = new URL(value);
 
             return (
               parsedUrl.protocol === "https:" &&
               parsedUrl.hostname === "github.com" &&
-              parsedUrl.pathname.startsWith(
-                "/Theophilus826/App-release/releases/download/"
-              ) &&
-              parsedUrl.pathname.endsWith("/TTSERVICE.apk")
+              parsedUrl.pathname ===
+                "/Theophilus826/Tofads-loan/releases/download/TTSERVICE/app-debug.apk" &&
+              !parsedUrl.search &&
+              !parsedUrl.hash &&
+              !parsedUrl.username &&
+              !parsedUrl.password
             );
           } catch {
             return false;
           }
         },
         message:
-          "apkUrl must be a valid TTSERVICE.apk URL from Theophilus826/App-release GitHub Releases",
+          "apkUrl must be the valid app-debug.apk URL from Theophilus826/Tofads-loan GitHub Releases",
       },
     },
 
@@ -64,4 +66,7 @@ const AppVersionSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("AppVersion", AppVersionSchema);
+module.exports = mongoose.model(
+  "AppVersion",
+  AppVersionSchema
+);

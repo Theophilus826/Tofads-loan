@@ -51,6 +51,8 @@ const AdminDisbursementRoutes = require("./routes/AdminDisbursementRoutes");
 const autoDebitRoutes = require("./routes/AutoDebitRoutes");
 const OnboardingRoutes = require("./routes/onboarding");
 const AdminRepaymentControllerRoute = require("./routes/AdminRepaymentControllerRoute");
+const appActivityRoutes = require("./routes/AppActivityRoute"); 
+
 
 // ==========================
 // CREATE EXPRESS APP
@@ -187,6 +189,8 @@ const startServer = async () => {
     app.use("/api/onboarding", OnboardingRoutes);
     app.use("/api/admin/repayments", AdminRepaymentControllerRoute);
     app.use("/api/app-version", appVersionRoutes);
+    app.use( "/api/app-activity", require("express").json({ limit: "10kb" }), appActivityRoutes );
+
     // ==========================
     // LOANS
     // ==========================
