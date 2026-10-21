@@ -2,6 +2,7 @@
 const mongoose = require("mongoose");
 const Notification = require("../model/Notification");
 
+const User = require("../model/UserModel");
 /* =========================================================
    HELPERS
 ========================================================= */
@@ -272,6 +273,62 @@ exports.deleteNotification = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to delete notification.",
+    });
+  }
+};
+
+
+/* =========================================================
+   REGISTER DEVICE FOR PUSH NOTIFICATIONS
+   POST /api/notifications/register-device
+========================================================= */
+
+exports.registerDevice = async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    const { token, platform } = req.body;
+
+    if (!isValidObjectId(userId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    if (
+      typeof token !== "string" ||
+      token.trim().length < 20 ||
+      token.length > 4096
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid device token is required.",
+      });
+    }
+
+    if (!["android", "ios"].includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        message: "Unsupported platform.",
+      });
+    }
+
+    await User.findByIdAndUpdate(
+      userId,
+      { $set: { fcmToken: token.trim() } },
+      { runValidators: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Push notification device registered.",
+    });
+  } catch (error) {
+    console.error("Register push device error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to register push notification device.",
     });
   }
 };

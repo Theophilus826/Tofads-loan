@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 const Notification = require("../model/Notification");
 const User = require("../model/UserModel");
@@ -27,9 +26,7 @@ const isValidObjectId = (id) =>
   Boolean(id && mongoose.Types.ObjectId.isValid(String(id)));
 
 const toObjectId = (id) =>
-  isValidObjectId(id)
-    ? new mongoose.Types.ObjectId(String(id))
-    : null;
+  isValidObjectId(id) ? new mongoose.Types.ObjectId(String(id)) : null;
 
 /* =========================================================
    FIREBASE PUSH
@@ -48,7 +45,7 @@ async function sendPushNotification({
       return;
     }
 
-    const user = await User.findById(userId).select("fcmToken");
+    const user = await User.findById(userId).select("+fcmToken");
 
     if (!user?.fcmToken) {
       return;
@@ -68,10 +65,7 @@ async function sendPushNotification({
     });
   } catch (error) {
     // Push delivery must never break a successful loan operation.
-    console.error(
-      "Notification push delivery failed:",
-      error.message
-    );
+    console.error("Notification push delivery failed:", error.message);
   }
 }
 
@@ -184,12 +178,7 @@ async function notifyLoanApplication({
   });
 }
 
-async function notifyLoanStatus({
-  userId,
-  loanId,
-  status,
-  rejectionReason,
-}) {
+async function notifyLoanStatus({ userId, loanId, status, rejectionReason }) {
   const normalizedStatus = String(status || "").toLowerCase();
 
   if (normalizedStatus === "approved") {
