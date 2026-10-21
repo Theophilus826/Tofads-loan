@@ -9,6 +9,7 @@ const AdminDisbursementService = require("./AdminDisbursementService");
 
 const { verifyWebhookSignature } = require("../config/PaymentProvider");
 const RepaymentSettlementService = require("../services/RepaymentSettlementService");
+const RepaymentScheduleRepository = require("../repositories/RepaymentScheduleRepository");
 
 // =========================================================
 // HELPERS
@@ -1919,33 +1920,45 @@ const handleChargeSuccess = async (payload) => {
     // ---------------------------------------------------
 
     if (!loan.repaymentSchedule) {
-      console.warn("⚠️ DVA FUNDED BUT LOAN HAS NO REPAYMENT SCHEDULE:", {
-        loanId: loan._id,
+      const RepaymentScheduleRepository = require("../repositories/RepaymentScheduleRepository");
 
-        userId: repaymentAccount.user,
+      const schedule = await RepaymentScheduleRepository.findByLoanInternal(
+        loan._id,
+      );
 
-        amount: amountInNaira,
+      if (!schedule) {
+        console.warn("⚠️ DVA FUNDED BUT LOAN HAS NO REPAYMENT SCHEDULE:", {
+          loanId: String(loan._id),
+          userId: String(repaymentAccount.user),
+          amount: amountInNaira,
+          repaymentFrequency: loan.repaymentFrequency,
+          disbursementStatus: loan.disbursementStatus,
+          providerReference,
+        });
+
+        return {
+          processed: true,
+          type: "repayment_account_dva_funding",
+          reference: providerReference,
+          accountNumber,
+          amount: amountInNaira,
+          repaymentApplied: false,
+          requiresReconciliation: true,
+          reason: "Loan has no repayment schedule",
+          loanId: String(loan._id),
+          funding: fundingResult,
+        };
+      }
+
+      // Restore the missing schedule reference on the loan.
+      loan.repaymentSchedule = schedule._id;
+      await loan.save();
+
+      console.log("✅ EXISTING REPAYMENT SCHEDULE LINK RESTORED:", {
+        loanId: String(loan._id),
+        scheduleId: String(schedule._id),
+        repaymentFrequency: loan.repaymentFrequency,
       });
-
-      return {
-        processed: true,
-
-        type: "repayment_account_dva_funding",
-
-        reference: providerReference,
-
-        accountNumber,
-
-        amount: amountInNaira,
-
-        repaymentApplied: false,
-
-        reason: "Loan has no repayment schedule",
-
-        loanId: loan._id,
-
-        funding: fundingResult,
-      };
     }
 
     // ---------------------------------------------------
