@@ -1,3 +1,4 @@
+
 const asyncHandler = require("express-async-handler");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -11,6 +12,8 @@ const LoanOffer = require("../model/LoanOfferModel");
 
 const LoanRepository = require("../repositories/LoanRepository");
 const LoanOfferRepository = require("../repositories/LoanOfferRepository");
+
+const { getLoanStatusForUser } = require("../services/loanStatusService");
 
 // =========================================================
 // CONSTANTS
@@ -1356,45 +1359,16 @@ const getMyProfile = asyncHandler(async (req, res) => {
 // =========================================================
 
 const getMyLoanStatus = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId = req.user?._id || req.user?.id;
 
-  const [activeApplication, applications, offers] = await Promise.all([
-    LoanRepository.findActiveApplicationByUser(userId),
-
-    LoanRepository.findApplicationsByUser(userId),
-
-    LoanOfferRepository.findByUser(userId),
-  ]);
-
-  let activeOffer = null;
-
-  if (activeApplication) {
-    activeOffer =
-      offers.find(
-        (offer) =>
-          offer.loanApplication?._id?.toString() ===
-          activeApplication._id.toString(),
-      ) || null;
-  }
+  const data = await getLoanStatusForUser(userId);
 
   return res.status(200).json({
     success: true,
-
-    data: {
-      application: activeApplication,
-
-      applicationStatus: activeApplication?.status || "no_application",
-
-      offer: activeOffer,
-
-      offerStatus: activeOffer?.status || null,
-
-      applications,
-
-      offers,
-    },
+    data,
   });
 });
+
 // =========================================================
 // UPDATE PROFILE
 // =========================================================

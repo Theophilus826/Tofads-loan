@@ -1,6 +1,9 @@
 
 const mongoose = require("mongoose");
 
+const APK_URL =
+  "https://github.com/Theophilus826/Tofads-loan/releases/download/TTSERVICE/app-debug.apk";
+
 const AppVersionSchema = new mongoose.Schema(
   {
     version: {
@@ -14,6 +17,7 @@ const AppVersionSchema = new mongoose.Schema(
       required: true,
       unique: true,
       min: 1,
+      index: true,
     },
 
     changelog: {
@@ -22,32 +26,15 @@ const AppVersionSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // Direct APK download URL from GitHub Releases
     apkUrl: {
       type: String,
       required: true,
       trim: true,
       validate: {
-        validator: function (value) {
-          try {
-            const parsedUrl = new URL(value);
-
-            return (
-              parsedUrl.protocol === "https:" &&
-              parsedUrl.hostname === "github.com" &&
-              parsedUrl.pathname ===
-                "/Theophilus826/Tofads-loan/releases/download/TTSERVICE/app-debug.apk" &&
-              !parsedUrl.search &&
-              !parsedUrl.hash &&
-              !parsedUrl.username &&
-              !parsedUrl.password
-            );
-          } catch {
-            return false;
-          }
+        validator(value) {
+          return value === APK_URL;
         },
-        message:
-          "apkUrl must be the valid app-debug.apk URL from Theophilus826/Tofads-loan GitHub Releases",
+        message: "Invalid APK download URL",
       },
     },
 
@@ -59,14 +46,16 @@ const AppVersionSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
     },
   },
   {
     timestamps: true,
+    // Uncomment only if your actual MongoDB collection is named appversions.
+    // collection: "appversions",
   }
 );
 
-module.exports = mongoose.model(
-  "AppVersion",
-  AppVersionSchema
-);
+AppVersionSchema.index({ isActive: 1, versionCode: -1 });
+
+module.exports = mongoose.model("AppVersion", AppVersionSchema);

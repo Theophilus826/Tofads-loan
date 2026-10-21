@@ -19,7 +19,7 @@ async function seedAppVersion() {
     console.log("Connected to MongoDB");
 
     const version = {
-      version: "1.0.0",
+      version: "1.0.03",
       versionCode: 1,
       changelog: "Initial release",
       apkUrl:
