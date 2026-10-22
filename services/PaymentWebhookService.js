@@ -1791,6 +1791,130 @@ const handleMandateExpired = async (payload, eventType) => {
 };
 
 // =========================================================
+// LOAN CARD AUTHORIZATION SUCCESS
+// =========================================================
+
+const handleLoanCardAuthorizationSuccess = async (payload) => {
+  const data = payload?.data || payload;
+
+  const metadata = data?.metadata || payload?.metadata || {};
+
+  const reference = data?.reference || payload?.reference || null;
+
+  if (metadata.purpose !== "LOAN_CARD_AUTHORIZATION") {
+    return null;
+  }
+
+  if (!reference) {
+    throw createError(
+      "Loan card authorization webhook is missing its reference",
+      400,
+    );
+  }
+
+  // Find the existing mandate created when authorization began.
+  // Do not create a new mandate from the webhook.
+  let mandate = await MandateRepository.findByReference(reference);
+
+  if (!mandate) {
+    mandate = await MandateRepository.findByProviderId(reference);
+  }
+
+  if (!mandate) {
+    throw createError(
+      `Loan mandate not found for authorization reference: ${reference}`,
+      404,
+    );
+  }
+
+  // A successful charge alone does not prove that the card
+  // is reusable. Do not mark the mandate active here.
+  const authorizationCode = getAuthorizationCode(payload);
+  const providerCustomerId = getProviderCustomerId(payload);
+
+  const update = {
+    providerData: payload,
+  };
+
+  if (providerCustomerId) {
+    update.providerCustomerId = providerCustomerId;
+  }
+
+  if (authorizationCode) {
+    update.authorizationCode = authorizationCode;
+  }
+
+  // Use the actual Paystack authorization reference if present.
+  const authorizationReference =
+    data?.authorization?.authorization_reference ||
+    data?.authorization?.authorizationReference ||
+    payload?.authorization_reference ||
+    payload?.authorizationReference ||
+    null;
+
+  if (authorizationReference) {
+    update.authorizationReference = authorizationReference;
+  }
+
+  // Store provider card details when supplied.
+  const authorization = data?.authorization || {};
+
+  const card = {};
+
+  if (authorization.card_type) card.cardType = authorization.card_type;
+  if (authorization.brand) card.brand = authorization.brand;
+  if (authorization.last4) card.last4 = authorization.last4;
+  if (authorization.exp_month) card.expMonth = authorization.exp_month;
+  if (authorization.exp_year) card.expYear = authorization.exp_year;
+  if (authorization.bank) card.bank = authorization.bank;
+  if (authorization.country_code) {
+    card.countryCode = authorization.country_code;
+  }
+  if (authorization.signature) card.signature = authorization.signature;
+  if (typeof authorization.reusable === "boolean") {
+    card.reusable = authorization.reusable;
+  }
+
+  if (Object.keys(card).length > 0) {
+    update.card = {
+      ...(mandate.card?.toObject?.() || mandate.card || {}),
+      ...card,
+    };
+  }
+
+  // Keep the mandate in an authorization state until the
+  // provider confirms reusable authorization.
+  if (
+    mandate.status !== "cancelled" &&
+    mandate.status !== "expired" &&
+    mandate.status !== "active"
+  ) {
+    update.status = "authorized";
+    update.authorizedAt = mandate.authorizedAt || new Date();
+  }
+
+  const updatedMandate = await MandateRepository.updateById(
+    mandate._id,
+    mandate.user,
+    update,
+  );
+
+  if (!updatedMandate) {
+    throw createError("Failed to update loan mandate authorization", 409);
+  }
+
+  return {
+    processed: true,
+    type: "loan_card_authorization",
+    mandateId: String(mandate._id),
+    reference,
+    status: updatedMandate.status,
+    reusable: updatedMandate.card?.reusable ?? null,
+    authorizationCodeSaved: Boolean(authorizationCode),
+  };
+};
+
+// =========================================================
 // CHARGE SUCCESS
 // =========================================================
 
@@ -1800,6 +1924,9 @@ const handleChargeSuccess = async (payload) => {
   const providerReference =
     payload?.data?.reference || payload?.reference || null;
 
+  if (metadata.purpose === "LOAN_CARD_AUTHORIZATION") {
+    return handleLoanCardAuthorizationSuccess(payload);
+  }
   // =====================================================
   // DVA TRANSFER
   // =====================================================
