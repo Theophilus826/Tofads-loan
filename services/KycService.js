@@ -146,13 +146,20 @@ const savePersonalInfo = async (userId, data = {}) => {
 /**
  * Get all KYC records.
  */
+
+
 const getAllKyc = async () => {
   const kycs = await KycRepository.findAllKyc();
+
+  
+
   const userIds = kycs
     .map((kyc) => kyc.user?._id || kyc.user)
     .filter(Boolean);
+
   const repaymentAccounts =
     await RepaymentAccountRepository.findByUsers(userIds);
+
   const accountsByUser = new Map(
     repaymentAccounts.map((account) => [
       String(account.user),
@@ -160,10 +167,18 @@ const getAllKyc = async () => {
     ]),
   );
 
-  return kycs.map((kyc) => {
+  const result = kycs.map((kyc) => {
     const data = kyc.toObject();
+
     const userId = kyc.user?._id || kyc.user;
     const account = accountsByUser.get(String(userId));
+
+    // Preserve populated user details, including email and phone.
+    data.user = kyc.user
+      ? typeof kyc.user.toObject === "function"
+        ? kyc.user.toObject()
+        : kyc.user
+      : null;
 
     data.repaymentAccount = account
       ? {
@@ -186,7 +201,11 @@ const getAllKyc = async () => {
 
     return data;
   });
+
+  
+  return result;
 };
+
 
 /**
  * Get one KYC record by ID.

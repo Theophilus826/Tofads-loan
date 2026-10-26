@@ -1,4 +1,3 @@
-
 const Kyc = require("../model/Kyc");
 
 /* =========================================================
@@ -14,9 +13,7 @@ const findByUserId = async (userId) => {
 const findByUserIdWithSensitiveData = async (userId) => {
   return Kyc.findOne({
     user: userId,
-  }).select(
-    "+bvn +idNumber +verificationData +faceVerificationData",
-  );
+  }).select("+bvn +idNumber +verificationData +faceVerificationData");
 };
 
 /* =========================================================
@@ -24,7 +21,13 @@ const findByUserIdWithSensitiveData = async (userId) => {
    ========================================================= */
 
 const findById = async (kycId) => {
-  return Kyc.findById(kycId);
+  return Kyc.findById(kycId)
+    .populate({
+      path: "user",
+      model: "User",
+      select: "name email phone",
+    })
+    .exec();
 };
 
 /* =========================================================
@@ -39,10 +42,7 @@ const create = async (data) => {
    UPDATE KYC BY USER
    ========================================================= */
 
-const updateByUserId = async (
-  userId,
-  data,
-) => {
+const updateByUserId = async (userId, data) => {
   return Kyc.findOneAndUpdate(
     {
       user: userId,
@@ -59,18 +59,11 @@ const updateByUserId = async (
    UPDATE KYC BY ID
    ========================================================= */
 
-const updateById = async (
-  kycId,
-  data,
-) => {
-  return Kyc.findByIdAndUpdate(
-    kycId,
-    data,
-    {
-      returnDocument: "after",
-      runValidators: true,
-    },
-  );
+const updateById = async (kycId, data) => {
+  return Kyc.findByIdAndUpdate(kycId, data, {
+    returnDocument: "after",
+    runValidators: true,
+  });
 };
 
 /* =========================================================
@@ -79,13 +72,13 @@ const updateById = async (
 
 const findAllKyc = async () => {
   return Kyc.find()
-    .populate(
-      "user",
-      "name email phone",
-    )
-    .sort({
-      createdAt: -1,
-    });
+    .populate({
+      path: "user",
+      model: "User",
+      select: "name email phone",
+    })
+    .sort({ createdAt: -1 })
+    .exec();
 };
 
 /* =========================================================
@@ -95,16 +88,10 @@ const findAllKyc = async () => {
 const findPendingKyc = async () => {
   return Kyc.find({
     status: {
-      $in: [
-        "submitted",
-        "under_review",
-      ],
+      $in: ["submitted", "under_review"],
     },
   })
-    .populate(
-      "user",
-      "name email phone",
-    )
+    .populate("user", "name email phone")
     .sort({
       createdAt: 1,
     });
@@ -114,98 +101,83 @@ const findPendingKyc = async () => {
    GET PENDING BVN VERIFICATIONS
    ========================================================= */
 
-const findPendingBvnVerification =
-  async () => {
-    return Kyc.find({
-      bvnVerificationStatus:
-        "pending",
-    }).sort({
-      updatedAt: 1,
-    });
-  };
+const findPendingBvnVerification = async () => {
+  return Kyc.find({
+    bvnVerificationStatus: "pending",
+  }).sort({
+    updatedAt: 1,
+  });
+};
 
 /* =========================================================
    GET BY CUSTOMER VERIFICATION REFERENCE
    ========================================================= */
 
-const findByCustomerVerificationReference =
-  async (reference) => {
-    if (!reference) {
-      return null;
-    }
+const findByCustomerVerificationReference = async (reference) => {
+  if (!reference) {
+    return null;
+  }
 
-    return Kyc.findOne({
-      customerVerificationReference:
-        reference,
-    });
-  };
+  return Kyc.findOne({
+    customerVerificationReference: reference,
+  });
+};
 
 /* =========================================================
    GET BY BVN VERIFICATION REFERENCE
    ========================================================= */
 
-const findByBvnVerificationReference =
-  async (reference) => {
-    if (!reference) {
-      return null;
-    }
+const findByBvnVerificationReference = async (reference) => {
+  if (!reference) {
+    return null;
+  }
 
-    return Kyc.findOne({
-      bvnVerificationReference:
-        reference,
-    });
-  };
+  return Kyc.findOne({
+    bvnVerificationReference: reference,
+  });
+};
 
 /* =========================================================
    GET BY PAYSTACK CUSTOMER CODE
    ========================================================= */
 
-const findByProviderCustomerCode =
-  async (customerCode) => {
-    if (!customerCode) {
-      return null;
-    }
+const findByProviderCustomerCode = async (customerCode) => {
+  if (!customerCode) {
+    return null;
+  }
 
-    return Kyc.findOne({
-      providerCustomerCode:
-        customerCode,
-    });
-  };
+  return Kyc.findOne({
+    providerCustomerCode: customerCode,
+  });
+};
 
 /* =========================================================
    GET BY FACE VERIFICATION REFERENCE
    ========================================================= */
 
-const findByFaceVerificationReference =
-  async (reference) => {
-    if (!reference) {
-      return null;
-    }
+const findByFaceVerificationReference = async (reference) => {
+  if (!reference) {
+    return null;
+  }
 
-    return Kyc.findOne({
-      faceVerificationReference:
-        reference,
-    });
-  };
+  return Kyc.findOne({
+    faceVerificationReference: reference,
+  });
+};
 
 /* =========================================================
    GET PENDING FACE VERIFICATIONS
    ========================================================= */
 
-const findPendingFaceVerification =
-  async () => {
-    return Kyc.find({
-      faceVerificationStatus:
-        "pending",
-    })
-      .populate(
-        "user",
-        "name email phone",
-      )
-      .sort({
-        updatedAt: 1,
-      });
-  };
+const findPendingFaceVerification = async () => {
+  return Kyc.find({
+    faceVerificationStatus: "pending",
+  })
+    .populate("user", "name email phone")
+    .sort({
+      updatedAt: 1,
+    });
+};
 
 /* =========================================================
    EXPORTS
@@ -234,4 +206,3 @@ module.exports = {
   findByFaceVerificationReference,
   findPendingFaceVerification,
 };
-
