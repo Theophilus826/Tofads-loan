@@ -8,6 +8,7 @@ const {
   markNotificationAsRead,
   markAllNotificationsAsRead,
   deleteNotification,
+  registerDevice,
 } = require("../controllers/NotificationController");
 
 const {
@@ -19,6 +20,7 @@ router.get("/stream", protect, subscribeNotifications);
 
 // Notification API
 router.get("/unread-count", protect, getUnreadCount);
+router.post("/register-device", protect, registerDevice);
 router.get("/", protect, getMyNotifications);
 router.patch("/read-all", protect, markAllNotificationsAsRead);
 router.patch("/:id/read", protect, markNotificationAsRead);
