@@ -1,3 +1,4 @@
+
 const express = require("express");
 
 const router = express.Router();
@@ -9,7 +10,10 @@ const {
   financeOfficer,
 } = require("../middleware/AuthMiddleware");
 
-// Existing mandate collection
+// =====================================================
+// MANDATE REPAYMENT COLLECTION
+// =====================================================
+
 router.post(
   "/loans/:loanId/repayments/collect",
   protect,
@@ -17,7 +21,10 @@ router.post(
   AdminRepaymentController.collectMandateRepayment
 );
 
-// NEW: reconcile an existing payment
+// =====================================================
+// RECONCILE EXISTING PAYMENT
+// =====================================================
+
 router.post(
   "/loans/:loanId/repayments/reconcile",
   protect,
@@ -25,12 +32,35 @@ router.post(
   AdminRepaymentController.reconcilePayment
 );
 
-// Existing repayment list
+// =====================================================
+// GET ALL REPAYMENTS
+// =====================================================
+
 router.get(
   "/",
   protect,
   financeOfficer,
   AdminRepaymentController.getRepayments
+);
+
+// =====================================================
+// FLOATING REMINDER MONITOR
+// =====================================================
+
+// Get paginated floating reminder records
+router.get(
+  "/floating-reminders",
+  protect,
+  financeOfficer,
+  AdminRepaymentController.getFloatingReminders
+);
+
+// Get floating reminder dashboard summary
+router.get(
+  "/floating-reminders/summary",
+  protect,
+  financeOfficer,
+  AdminRepaymentController.getFloatingReminderSummary
 );
 
 module.exports = router;

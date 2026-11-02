@@ -32,13 +32,22 @@ const requireParam = (req, res, name, message) => {
   return value;
 };
 
+const parsePagination = (query) => {
+  const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
+  const requestedLimit = Number.parseInt(query.limit, 10) || 20;
+
+  return {
+    page,
+    limit: Math.min(100, Math.max(1, requestedLimit)),
+  };
+};
+
 /**
  * POST /api/admin/loans/:loanId/repayments/collect
  */
 const collectMandateRepayment = async (req, res, next) => {
   try {
     const adminUserId = requireAuth(req, res);
-
     if (!adminUserId) return;
 
     const loanId = requireParam(
@@ -47,7 +56,6 @@ const collectMandateRepayment = async (req, res, next) => {
       "loanId",
       "Loan ID is required"
     );
-
     if (!loanId) return;
 
     const { amount } = req.body;
@@ -75,9 +83,7 @@ const collectMandateRepayment = async (req, res, next) => {
         adminUserId,
       });
 
-    const isFailed = result.status === "failed";
-
-    if (isFailed) {
+    if (result.status === "failed") {
       return res.status(400).json({
         success: false,
         message:
@@ -100,14 +106,10 @@ const collectMandateRepayment = async (req, res, next) => {
 
 /**
  * POST /api/admin/loans/:loanId/repayments/reconcile
- *
- * Reconciles an existing successful payment that was credited
- * to the repayment account but was not applied to the loan.
  */
 const reconcilePayment = async (req, res, next) => {
   try {
     const adminUserId = requireAuth(req, res);
-
     if (!adminUserId) return;
 
     const loanId = requireParam(
@@ -116,7 +118,6 @@ const reconcilePayment = async (req, res, next) => {
       "loanId",
       "Loan ID is required"
     );
-
     if (!loanId) return;
 
     const { providerReference } = req.body;
@@ -147,10 +148,12 @@ const reconcilePayment = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/admin/repayments
+ */
 const getRepayments = async (req, res, next) => {
   try {
     const adminUserId = requireAuth(req, res);
-
     if (!adminUserId) return;
 
     const {
@@ -180,9 +183,60 @@ const getRepayments = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /api/admin/repayments/floating-reminders
+ *
+ * Get paginated floating reminder records.
+ */
+const getFloatingReminders = async (req, res, next) => {
+  try {
+    const adminUserId = requireAuth(req, res);
+    if (!adminUserId) return;
+
+    const { page, limit } = parsePagination(req.query);
+
+    const result = await AdminRepaymentService.getFloatingReminders({
+      status: req.query.status || "",
+      search: String(req.query.search || "").trim(),
+      page,
+      limit,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * GET /api/admin/repayments/floating-reminders/summary
+ *
+ * Get floating reminder dashboard statistics.
+ */
+const getFloatingReminderSummary = async (req, res, next) => {
+  try {
+    const adminUserId = requireAuth(req, res);
+    if (!adminUserId) return;
+
+    const result =
+      await AdminRepaymentService.getFloatingReminderSummary();
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   collectMandateRepayment,
   reconcilePayment,
   getRepayments,
+  getFloatingReminders,
+  getFloatingReminderSummary,
 };
-
