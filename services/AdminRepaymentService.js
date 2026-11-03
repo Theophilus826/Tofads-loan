@@ -2,7 +2,8 @@
 const mongoose = require("mongoose");
 
 const Loan = require("../model/Loan");
-const User = require("../model/User");
+const User = require("../model/UserModel");
+
 const Repayment = require("../model/RepaymentModel");
 const FloatingReminder = require("../model/FloatingReminder");
 
