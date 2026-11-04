@@ -65,11 +65,15 @@ router.get(
 
 router.get(
   "/floating-reminders/appearance",
+  protect,
+  financeOfficer,
   AdminRepaymentController.getFloatingReminderAppearance
 );
 
 router.put(
   "/floating-reminders/appearance",
+  protect,
+  financeOfficer,
   AdminRepaymentController.updateFloatingReminderAppearance
 );
 

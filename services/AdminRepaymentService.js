@@ -1002,58 +1002,63 @@ class AdminRepaymentService {
   /**
    * Update global floating reminder appearance settings.
    */
-  static async updateFloatingReminderAppearance({
-    settings,
-    adminUserId,
-  }) {
-    if (!settings || !adminUserId) {
-      throw createServiceError(
-        "Appearance settings and admin user are required"
-      );
-    }
-
-    const updated =
-      await FloatingReminderAppearance.findOneAndUpdate(
-        { key: "global" },
-        {
-          $set: {
-            ...settings,
-            updatedBy: adminUserId,
-          },
-          $setOnInsert: {
-            key: "global",
-          },
-        },
-        {
-          new: true,
-          upsert: true,
-          runValidators: true,
-          setDefaultsOnInsert: true,
-        }
-      ).lean();
-
-    if (!updated) {
-      throw createServiceError(
-        "Could not save floating reminder appearance settings",
-        500
-      );
-    }
-
-    return {
-      reminderWidth: updated.reminderWidth,
-      reminderBackgroundHex:
-        updated.reminderBackgroundHex,
-      reminderTextColor: updated.reminderTextColor,
-      reminderTextSize: updated.reminderTextSize,
-      reminderCornerRadius:
-        updated.reminderCornerRadius,
-      reminderHorizontalPadding:
-        updated.reminderHorizontalPadding,
-      reminderVerticalPadding:
-        updated.reminderVerticalPadding,
-      reminderPositionY: updated.reminderPositionY,
-    };
+  
+/**
+ * Update global floating reminder appearance settings.
+ */
+static async updateFloatingReminderAppearance({
+  settings,
+  adminUserId,
+}) {
+  if (!settings || !adminUserId) {
+    throw createServiceError(
+      "Appearance settings and admin user are required"
+    );
   }
+
+  const updated =
+    await FloatingReminderAppearance.findOneAndUpdate(
+      { key: "global" },
+      {
+        $set: {
+          ...settings,
+          updatedBy: adminUserId,
+        },
+        $setOnInsert: {
+          key: "global",
+        },
+      },
+      {
+        returnDocument: "after", // FIXED
+        upsert: true,
+        runValidators: true,
+        setDefaultsOnInsert: true,
+      }
+    ).lean();
+
+  if (!updated) {
+    throw createServiceError(
+      "Could not save floating reminder appearance settings",
+      500
+    );
+  }
+
+  return {
+    reminderWidth: updated.reminderWidth,
+    reminderBackgroundHex:
+      updated.reminderBackgroundHex,
+    reminderTextColor: updated.reminderTextColor,
+    reminderTextSize: updated.reminderTextSize,
+    reminderCornerRadius:
+      updated.reminderCornerRadius,
+    reminderHorizontalPadding:
+      updated.reminderHorizontalPadding,
+    reminderVerticalPadding:
+      updated.reminderVerticalPadding,
+    reminderPositionY: updated.reminderPositionY,
+  };
+}
+
 }
 
 module.exports = AdminRepaymentService;
