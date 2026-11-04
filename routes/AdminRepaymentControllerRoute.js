@@ -63,4 +63,14 @@ router.get(
   AdminRepaymentController.getFloatingReminderSummary
 );
 
+router.get(
+  "/floating-reminders/appearance",
+  AdminRepaymentController.getFloatingReminderAppearance
+);
+
+router.put(
+  "/floating-reminders/appearance",
+  AdminRepaymentController.updateFloatingReminderAppearance
+);
+
 module.exports = router;

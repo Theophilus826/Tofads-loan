@@ -6,7 +6,9 @@ const User = require("../model/UserModel");
 
 const Repayment = require("../model/RepaymentModel");
 const FloatingReminder = require("../model/FloatingReminder");
-
+const FloatingReminderAppearance = require(
+  "../model/FloatingReminderAppearance"
+);
 const RepaymentScheduleRepository = require("../repositories/RepaymentScheduleRepository");
 const MandateRepository = require("../repositories/MandateRepository");
 const RepaymentAccountRepository = require("../repositories/RepaymentAccountRepository");
@@ -951,6 +953,107 @@ class AdminRepaymentService {
     };
   }
 
+    // =====================================================
+  // FLOATING REMINDER APPEARANCE
+  // =====================================================
+
+  static DEFAULT_FLOATING_REMINDER_APPEARANCE = {
+    reminderWidth: 320,
+    reminderBackgroundHex: "#173B68",
+    reminderTextColor: "#FFFFFF",
+    reminderTextSize: 14,
+    reminderCornerRadius: 18,
+    reminderHorizontalPadding: 20,
+    reminderVerticalPadding: 16,
+    reminderPositionY: 100,
+  };
+
+  /**
+   * Get global floating reminder appearance settings.
+   */
+  static async getFloatingReminderAppearance() {
+    const settings =
+      await FloatingReminderAppearance.findOne({
+        key: "global",
+      }).lean();
+
+    if (!settings) {
+      return {
+        ...this.DEFAULT_FLOATING_REMINDER_APPEARANCE,
+      };
+    }
+
+    return {
+      reminderWidth: settings.reminderWidth,
+      reminderBackgroundHex:
+        settings.reminderBackgroundHex,
+      reminderTextColor: settings.reminderTextColor,
+      reminderTextSize: settings.reminderTextSize,
+      reminderCornerRadius:
+        settings.reminderCornerRadius,
+      reminderHorizontalPadding:
+        settings.reminderHorizontalPadding,
+      reminderVerticalPadding:
+        settings.reminderVerticalPadding,
+      reminderPositionY: settings.reminderPositionY,
+    };
+  }
+
+  /**
+   * Update global floating reminder appearance settings.
+   */
+  static async updateFloatingReminderAppearance({
+    settings,
+    adminUserId,
+  }) {
+    if (!settings || !adminUserId) {
+      throw createServiceError(
+        "Appearance settings and admin user are required"
+      );
+    }
+
+    const updated =
+      await FloatingReminderAppearance.findOneAndUpdate(
+        { key: "global" },
+        {
+          $set: {
+            ...settings,
+            updatedBy: adminUserId,
+          },
+          $setOnInsert: {
+            key: "global",
+          },
+        },
+        {
+          new: true,
+          upsert: true,
+          runValidators: true,
+          setDefaultsOnInsert: true,
+        }
+      ).lean();
+
+    if (!updated) {
+      throw createServiceError(
+        "Could not save floating reminder appearance settings",
+        500
+      );
+    }
+
+    return {
+      reminderWidth: updated.reminderWidth,
+      reminderBackgroundHex:
+        updated.reminderBackgroundHex,
+      reminderTextColor: updated.reminderTextColor,
+      reminderTextSize: updated.reminderTextSize,
+      reminderCornerRadius:
+        updated.reminderCornerRadius,
+      reminderHorizontalPadding:
+        updated.reminderHorizontalPadding,
+      reminderVerticalPadding:
+        updated.reminderVerticalPadding,
+      reminderPositionY: updated.reminderPositionY,
+    };
+  }
 }
 
 module.exports = AdminRepaymentService;

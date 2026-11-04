@@ -233,10 +233,146 @@ const getFloatingReminderSummary = async (req, res, next) => {
   }
 };
 
+const DEFAULT_FLOATING_REMINDER_APPEARANCE = {
+  reminderWidth: 320,
+  reminderBackgroundHex: "#173B68",
+  reminderTextColor: "#FFFFFF",
+  reminderTextSize: 14,
+  reminderCornerRadius: 18,
+  reminderHorizontalPadding: 20,
+  reminderVerticalPadding: 16,
+  reminderPositionY: 100,
+};
+
+const validateReminderAppearance = (body) => {
+  const settings = {
+    reminderWidth: Number(body.reminderWidth),
+    reminderBackgroundHex: String(
+      body.reminderBackgroundHex || ""
+    ).trim(),
+    reminderTextColor: String(
+      body.reminderTextColor || ""
+    ).trim(),
+    reminderTextSize: Number(body.reminderTextSize),
+    reminderCornerRadius: Number(body.reminderCornerRadius),
+    reminderHorizontalPadding: Number(
+      body.reminderHorizontalPadding
+    ),
+    reminderVerticalPadding: Number(
+      body.reminderVerticalPadding
+    ),
+    reminderPositionY: Number(body.reminderPositionY),
+  };
+
+  const ranges = {
+    reminderWidth: [200, 600],
+    reminderTextSize: [10, 30],
+    reminderCornerRadius: [0, 50],
+    reminderHorizontalPadding: [0, 60],
+    reminderVerticalPadding: [0, 60],
+    reminderPositionY: [0, 2000],
+  };
+
+  for (const [key, [min, max]] of Object.entries(ranges)) {
+    if (
+      !Number.isFinite(settings[key]) ||
+      settings[key] < min ||
+      settings[key] > max
+    ) {
+      return {
+        valid: false,
+        message: `${key} must be between ${min} and ${max}`,
+      };
+    }
+  }
+
+  const hexPattern = /^#([0-9A-Fa-f]{6})$/;
+
+  if (!hexPattern.test(settings.reminderBackgroundHex)) {
+    return {
+      valid: false,
+      message: "Background colour must be a valid 6-digit HEX colour",
+    };
+  }
+
+  if (!hexPattern.test(settings.reminderTextColor)) {
+    return {
+      valid: false,
+      message: "Text colour must be a valid 6-digit HEX colour",
+    };
+  }
+
+  settings.reminderBackgroundHex =
+    settings.reminderBackgroundHex.toUpperCase();
+
+  settings.reminderTextColor =
+    settings.reminderTextColor.toUpperCase();
+
+  return {
+    valid: true,
+    settings,
+  };
+};
+
+/**
+ * GET /api/admin/repayments/floating-reminders/appearance
+ */
+const getFloatingReminderAppearance = async (req, res, next) => {
+  try {
+    const adminUserId = requireAuth(req, res);
+    if (!adminUserId) return;
+
+    const settings =
+      await AdminRepaymentService.getFloatingReminderAppearance();
+
+    return res.status(200).json({
+      success: true,
+      data: settings || DEFAULT_FLOATING_REMINDER_APPEARANCE,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * PUT /api/admin/repayments/floating-reminders/appearance
+ */
+const updateFloatingReminderAppearance = async (req, res, next) => {
+  try {
+    const adminUserId = requireAuth(req, res);
+    if (!adminUserId) return;
+
+    const validation = validateReminderAppearance(req.body || {});
+
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: validation.message,
+      });
+    }
+
+    const settings =
+      await AdminRepaymentService.updateFloatingReminderAppearance({
+        settings: validation.settings,
+        adminUserId,
+      });
+
+    return res.status(200).json({
+      success: true,
+      message: "Floating reminder appearance updated successfully",
+      data: settings,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   collectMandateRepayment,
   reconcilePayment,
   getRepayments,
+  getFloatingReminderAppearance,
+  updateFloatingReminderAppearance,
   getFloatingReminders,
   getFloatingReminderSummary,
 };
