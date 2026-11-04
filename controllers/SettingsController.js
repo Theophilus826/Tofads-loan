@@ -1,5 +1,6 @@
 
 const PlatformSettings = require("../model/PlatformSettings");
+const AdminRepaymentService = require("../services/AdminRepaymentService");
 
 // =========================================================
 // ALLOWED REGISTRATION ROLES
@@ -66,6 +67,25 @@ const getWidgetSettings = async (req, res, next) => {
         floatingReminderEnabled:
           settings?.floatingReminderEnabled ?? false,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// =========================================================
+// GET CUSTOMER-SAFE FLOATING REMINDER APPEARANCE
+// GET /api/settings/floating-reminder-appearance
+// =========================================================
+
+const getFloatingReminderAppearance = async (req, res, next) => {
+  try {
+    const appearance =
+      await AdminRepaymentService.getFloatingReminderAppearance();
+
+    return res.status(200).json({
+      success: true,
+      data: appearance,
     });
   } catch (error) {
     next(error);
@@ -202,6 +222,6 @@ const updateAdminSettings = async (req, res, next) => {
 module.exports = {
   getAdminSettings,
   getWidgetSettings,
+  getFloatingReminderAppearance,
   updateAdminSettings,
 };
-

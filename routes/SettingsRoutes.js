@@ -71,4 +71,10 @@ router.get(
   SettingsController.getWidgetSettings
 );
 
+router.get(
+  "/floating-reminder-appearance",
+  protect,
+  SettingsController.getFloatingReminderAppearance
+);
+
 module.exports = router;
