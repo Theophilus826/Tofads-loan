@@ -9,9 +9,13 @@ const { formatPhone, hashPhone } = require("../config/phone");
 const User = require("../model/UserModel");
 const LoanApplication = require("../model/LoanApplication");
 const LoanOffer = require("../model/LoanOfferModel");
+const Session = require("../model/SessionModel");
 
-const LoanRepository = require("../repositories/LoanRepository");
-const LoanOfferRepository = require("../repositories/LoanOfferRepository");
+const {
+  hashToken,
+  generateAccessToken,
+  createDeviceSession,
+} = require("../services/sessionService");
 
 const { getLoanStatusForUser } = require("../services/loanStatusService");
 
@@ -60,6 +64,98 @@ const generateToken = (id, expiresIn = "7d") => {
     },
   );
 };
+
+const refreshAccessToken = asyncHandler(async (req, res) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    return res.status(401).json({
+      success: false,
+      message: "Refresh token is required",
+    });
+  }
+
+  const oldHash = hashToken(refreshToken);
+
+  const session = await Session.findOne({
+    refreshTokenHash: oldHash,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  }).select("+refreshTokenHash");
+
+  if (!session) {
+    return res.status(401).json({
+      success: false,
+      message: "Session expired or revoked. Please log in again.",
+    });
+  }
+
+  const user = await User.findById(session.user);
+
+  if (
+    !user ||
+    user.accountStatus !== "active"
+  ) {
+    await Session.updateOne(
+      { _id: session._id },
+      { $set: { revokedAt: new Date() } }
+    );
+
+    return res.status(403).json({
+      success: false,
+      message: "Account is not active",
+    });
+  }
+
+  // Rotate refresh token.
+  const newRefreshToken = crypto.randomBytes(64).toString("hex");
+
+  const newRefreshHash = hashToken(newRefreshToken);
+
+  const now = new Date();
+
+  const updatedSession = await Session.findOneAndUpdate(
+    {
+      _id: session._id,
+      refreshTokenHash: oldHash,
+      revokedAt: null,
+      expiresAt: { $gt: now },
+    },
+    {
+      $set: {
+        refreshTokenHash: newRefreshHash,
+        lastUsedAt: now,
+        expiresAt: new Date(
+          now.getTime() + 30 * 24 * 60 * 60 * 1000
+        ),
+      },
+    },
+    { new: true }
+  );
+
+  // Prevent reuse of an already rotated token.
+  if (!updatedSession) {
+    return res.status(401).json({
+      success: false,
+      message: "Refresh token already used. Please log in again.",
+    });
+  }
+
+  const accessToken = generateAccessToken(
+    user._id,
+    session._id
+  );
+
+  return res.status(200).json({
+    success: true,
+    message: "Token refreshed successfully",
+    data: {
+      accessToken,
+      refreshToken: newRefreshToken,
+      expiresIn: 1800,
+    },
+  });
+});
 
 // =========================================================
 // COOKIE OPTIONS
@@ -179,227 +275,95 @@ const registerUser = asyncHandler(async (req, res) => {
   let { name, email, phone, password, confirmPassword, referralCode } =
     req.body;
 
-  console.log("=== REGISTER TEST START ===");
-
-  console.log("REGISTER BODY:", {
-    name,
-    email,
-    phone,
-    passwordProvided: Boolean(password),
-    confirmPasswordProvided: Boolean(confirmPassword),
-    referralCode,
-  });
-
-  // ===================================================
-  // VALIDATION
-  // ===================================================
-
   name = typeof name === "string" ? name.trim() : "";
-
   email = typeof email === "string" ? email.trim().toLowerCase() : undefined;
 
   const rawPhone = typeof phone === "string" ? phone.trim() : undefined;
-
   phone = rawPhone ? formatPhone(rawPhone) : undefined;
 
+  // VALIDATION
   if (!name || !password || !confirmPassword) {
     res.status(400);
-
     throw new Error("Name, password and confirm password are required");
   }
 
   if (name.length < 2) {
     res.status(400);
-
     throw new Error("Name must be at least 2 characters");
   }
 
   if (!/^\d{4}$/.test(String(password))) {
-    return res.status(400).json({
-      success: false,
-      message: "Password must be exactly 4 digits",
-    });
+    res.status(400);
+    throw new Error("Password must be exactly 4 digits");
   }
 
   if (password !== confirmPassword) {
     res.status(400);
-
     throw new Error("Passwords do not match");
   }
 
   if (!email && !phone) {
     res.status(400);
-
     throw new Error("Provide an email or phone number");
   }
 
   if (rawPhone && !phone) {
     res.status(400);
-
     throw new Error("Invalid phone number");
   }
 
-  // ===================================================
   // CHECK EXISTING USER
-  // ===================================================
-
   const orQuery = [];
 
-  if (email) {
-    orQuery.push({
-      email,
-    });
-  }
+  if (email) orQuery.push({ email });
+  if (phone) orQuery.push({ phone });
 
-  if (phone) {
-    orQuery.push({
-      phone,
-    });
-  }
-
-  console.log("Checking existing user:", orQuery);
-
-  const existingUser = await User.findOne({
-    $or: orQuery,
-  });
-
-  console.log(
-    "Existing user:",
-    existingUser
-      ? {
-          id: existingUser._id,
-          email: existingUser.email,
-          phone: existingUser.phone,
-          referralCode: existingUser.referralCode,
-        }
-      : null,
-  );
+  const existingUser = await User.findOne({ $or: orQuery });
 
   if (existingUser) {
     res.status(409);
-
     throw new Error("An account with this email or phone already exists");
   }
 
-  // ===================================================
   // HASH PHONE
-  // ===================================================
+  const phoneHash = phone ? hashPhone(phone) : undefined;
 
-  let phoneHash;
-
-  if (phone) {
-    phoneHash = hashPhone(phone);
-  }
-
-  // ===================================================
-  // PASSWORD
-  // ===================================================
-
+  // HASH PASSWORD
   const hashedPassword = await bcrypt.hash(password, 12);
 
-  // ===================================================
-  // REFERRAL CODE
-  // ===================================================
-
+  // GENERATE REFERRAL CODE
   const myReferralCode = await generateReferralCode();
 
-  console.log("Generated referral code:", myReferralCode);
-
-  // ===================================================
   // CREATE USER DATA
-  // ===================================================
-
   const userData = {
     name,
-
     password: hashedPassword,
-
     role: "customer",
-
     isAdmin: false,
-
     isVerified: false,
-
     accountStatus: "active",
-
     borrowerStatus: "new",
-
     kycStatus: "pending",
-
     online: true,
-
     lastActive: new Date(),
-
     coins: 0,
-
     referralCode: myReferralCode,
   };
 
-  if (email) {
-    userData.email = email;
-  }
+  if (email) userData.email = email;
+  if (phone) userData.phone = phone;
+  if (phoneHash) userData.phoneHash = phoneHash;
 
-  if (phone) {
-    userData.phone = phone;
-  }
-
-  if (phoneHash) {
-    userData.phoneHash = phoneHash;
-  }
-
-  console.log("USER DATA BEFORE CREATE:", {
-    ...userData,
-    password: "[HASHED]",
-  });
-
-  // ===================================================
   // CREATE USER
-  // ===================================================
-
   let user;
 
   try {
     user = await User.create(userData);
-
-    console.log("USER CREATED:", user._id);
   } catch (error) {
-    console.error("========== USER CREATE FAILED ==========");
-
-    console.error("Error name:", error.name);
-
-    console.error("Error message:", error.message);
-
-    console.error("Error code:", error.code);
-
-    console.error("Error keyPattern:", error.keyPattern);
-
-    console.error("Error keyValue:", error.keyValue);
-
-    if (error.errors) {
-      console.error(
-        "Validation errors:",
-        Object.fromEntries(
-          Object.entries(error.errors).map(([key, value]) => [
-            key,
-            value.message,
-          ]),
-        ),
-      );
-    }
-
-    console.error("Full error:", error);
-
-    console.error("==========================================");
-
-    // =================================================
-    // MONGODB DUPLICATE KEY
-    // =================================================
-
     if (error.code === 11000) {
       const duplicateField = Object.keys(error.keyPattern || {})[0];
 
       res.status(409);
-
       throw new Error(
         duplicateField
           ? `${duplicateField} is already in use`
@@ -407,69 +371,60 @@ const registerUser = asyncHandler(async (req, res) => {
       );
     }
 
-    // =================================================
-    // MONGOOSE VALIDATION ERROR
-    // =================================================
-
     if (error.name === "ValidationError") {
       const message = Object.values(error.errors || {})
         .map((err) => err.message)
         .join(", ");
 
       res.status(400);
-
       throw new Error(message || "Invalid user data");
     }
 
-    // =================================================
-    // OTHER DATABASE ERROR
-    // =================================================
+    console.error("USER CREATE FAILED:", error);
 
     res.status(500);
-
     throw new Error("Unable to create account");
   }
 
-  // ===================================================
-  // REFERRAL
-  // ===================================================
-
+  // PROCESS REFERRAL
   if (referralCode) {
-    console.log("Processing referral:", referralCode);
-
     await handleReferral(user._id, referralCode);
   }
 
-  // ===================================================
-  // TOKEN
-  // ===================================================
+  // CREATE SECURE DEVICE SESSION
+  const {
+    session,
+    accessToken,
+    refreshToken,
+  } = await createDeviceSession(user, req);
 
-  const token = generateToken(user._id);
+  // ACCESS TOKEN COOKIE
+  res.cookie("token", accessToken, {
+    ...getCookieOptions(),
+    maxAge: 15 * 60 * 1000,
+  });
 
-  // ===================================================
-  // COOKIE
-  // ===================================================
-
-  res.cookie("token", token, getCookieOptions());
-
-  // ===================================================
   // RESPONSE
-  // ===================================================
-
   const safeUser = sanitizeUser(user);
-
-  console.log("REGISTER SUCCESS:", user._id);
-
-  console.log("=== REGISTER TEST END ===");
 
   return res.status(201).json({
     success: true,
-
     message: "Registration successful",
-
     data: safeUser,
 
-    token,
+    token: accessToken,
+    accessToken,
+
+    refreshToken,
+
+    expiresIn: 1800,
+
+    session: {
+      id: session._id,
+      deviceId: session.deviceId,
+      deviceName: session.deviceName,
+      expiresAt: session.expiresAt,
+    },
   });
 });
 
@@ -507,25 +462,25 @@ const handleReferral = async (userId, referralCode) => {
 // LOGIN
 // =========================================================
 
+
 const loginUser = asyncHandler(async (req, res) => {
   console.log("\n========== LOGIN TEST START ==========");
 
   try {
-    let { identifier, password } = req.body;
+    let { identifier, password, deviceId, deviceName } = req.body;
 
     console.log("1. Request received");
     console.log("   Identifier:", identifier);
     console.log("   Password supplied:", Boolean(password));
+    console.log("   Device ID supplied:", Boolean(deviceId));
+    console.log("   Device name:", deviceName || "Unknown device");
 
     // ===================================================
     // VALIDATION
     // ===================================================
 
     if (!identifier || !password) {
-      console.log("❌ 2. Missing identifier or password");
-
       res.status(400);
-
       throw new Error("Identifier and password are required");
     }
 
@@ -544,14 +499,11 @@ const loginUser = asyncHandler(async (req, res) => {
     console.log("   User found:", Boolean(user));
 
     if (!user) {
-      console.log("❌ User not found");
-
       res.status(401);
-
       throw new Error("Invalid credentials");
     }
 
-    console.log("   User ID:", user._id?.toString());
+    console.log("   User ID:", user._id.toString());
     console.log("   User email:", user.email);
     console.log("   User role:", user.role);
     console.log("   Account status:", user.accountStatus);
@@ -563,86 +515,83 @@ const loginUser = asyncHandler(async (req, res) => {
 
     console.log("4. Checking account status...");
 
-    if (user.accountStatus === "blocked") {
-      console.log("❌ Account blocked");
-
+    if (
+      ["blocked", "closed", "suspended"].includes(
+        user.accountStatus
+      )
+    ) {
       res.status(403);
 
-      throw new Error("Your account has been blocked");
+      throw new Error(
+        user.accountStatus === "blocked"
+          ? "Your account has been blocked"
+          : user.accountStatus === "closed"
+            ? "Your account has been closed"
+            : "Your account is suspended"
+      );
     }
 
-    if (user.accountStatus === "closed") {
-      console.log("❌ Account closed");
-
+    if (user.accountStatus !== "active") {
       res.status(403);
-
-      throw new Error("Your account has been closed");
-    }
-
-    if (user.accountStatus === "suspended") {
-      console.log("❌ Account suspended");
-
-      res.status(403);
-
-      throw new Error("Your account is suspended");
+      throw new Error("Your account is not active");
     }
 
     console.log("   Account status OK");
 
     // ===================================================
-    // PASSWORD
+    // PASSWORD VERIFICATION
     // ===================================================
 
     console.log("5. Comparing password...");
 
-    const matched = await bcrypt.compare(password, user.password);
+    const matched = await bcrypt.compare(
+      password,
+      user.password
+    );
 
     console.log("   Password matched:", matched);
 
     if (!matched) {
-      console.log("❌ Invalid password");
-
       res.status(401);
-
       throw new Error("Invalid credentials");
     }
 
     console.log("   Password OK");
 
     // ===================================================
-    // UPDATE SESSION STATE
+    // CREATE SECURE DEVICE SESSION
     // ===================================================
 
-    console.log("6. Updating session state...");
+    console.log("6. Creating secure device session...");
+
+    const {
+      session,
+      accessToken,
+      refreshToken,
+    } = await createDeviceSession(user, req);
+
+    if (!session || !accessToken || !refreshToken) {
+      res.status(500);
+      throw new Error("Failed to create secure device session");
+    }
+
+    console.log("   Session created:", session._id.toString());
+    console.log("   Device ID:", session.deviceId);
+    console.log("   Access token generated:", Boolean(accessToken));
+    console.log("   Refresh token generated:", Boolean(refreshToken));
+
+    // ===================================================
+    // UPDATE USER ACTIVITY
+    // ===================================================
+
+    console.log("7. Updating user activity...");
 
     user.online = true;
     user.lastActive = new Date();
 
     await user.save();
 
-    console.log("   User session state saved");
-
-    // ===================================================
-    // TOKEN
-    // ===================================================
-
-    console.log("7. Generating JWT...");
-
-    console.log("   User ID passed to generateToken:", user._id?.toString());
-
-    console.log("   JWT_SECRET configured:", Boolean(process.env.JWT_SECRET));
-
-    const token = generateToken(user._id);
-
-    console.log("   Token generated:", Boolean(token));
-
-    if (!token) {
-      console.log("❌ Token generation returned empty value");
-
-      res.status(500);
-
-      throw new Error("Failed to generate authentication token");
-    }
+    console.log("   User activity saved");
 
     // ===================================================
     // COOKIE
@@ -650,18 +599,14 @@ const loginUser = asyncHandler(async (req, res) => {
 
     console.log("8. Setting authentication cookie...");
 
-    const cookieOptions = getCookieOptions();
+    const cookieOptions = {
+      ...getCookieOptions(),
+      maxAge: 15 * 60 * 1000,
+    };
 
-    console.log("   Cookie options:", {
-      httpOnly: cookieOptions?.httpOnly,
-      secure: cookieOptions?.secure,
-      sameSite: cookieOptions?.sameSite,
-      path: cookieOptions?.path,
-    });
+    res.cookie("token", accessToken, cookieOptions);
 
-    res.cookie("token", token, cookieOptions);
-
-    console.log("   Cookie set");
+    console.log("   Authentication cookie set");
 
     // ===================================================
     // SANITIZE USER
@@ -671,21 +616,41 @@ const loginUser = asyncHandler(async (req, res) => {
 
     const safeUser = sanitizeUser(user);
 
-    console.log("   Sanitized user created:", Boolean(safeUser));
-
     // ===================================================
     // SUCCESS
     // ===================================================
 
-    console.log("✅ LOGIN SUCCESS");
+    console.log("LOGIN SUCCESS");
+    console.log("   Session ID:", session._id.toString());
+    console.log("   User ID:", user._id.toString());
+    console.log("   Access token expires in: 7 days");
+    console.log("   Refresh token expires in: 30 days");
+
     console.log("========== LOGIN TEST END ==========\n");
 
     return res.status(200).json({
       success: true,
+
       message: "Login successful",
+
       data: safeUser,
-      token,
+
+      token: accessToken,
+
+      accessToken,
+
+      refreshToken,
+
+      expiresIn: 1800,
+
+      session: {
+        id: session._id,
+        deviceId: session.deviceId,
+        deviceName: session.deviceName,
+        expiresAt: session.expiresAt,
+      },
     });
+
   } catch (error) {
     console.error("\n========== LOGIN ERROR ==========");
     console.error("Message:", error.message);
@@ -696,6 +661,7 @@ const loginUser = asyncHandler(async (req, res) => {
     throw error;
   }
 });
+
 
 // =========================================================
 // LOGOUT
@@ -1724,6 +1690,10 @@ const getCustomerProfile = asyncHandler(async (req, res) => {
     },
   });
 });
+
+
+
+
 // =========================================================
 // EXPORT
 // =========================================================
@@ -1747,4 +1717,5 @@ module.exports = {
   updateAccountStatus,
   getCustomerProfile,
   sanitizeUser,
+  refreshAccessToken,
 };

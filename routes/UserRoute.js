@@ -28,6 +28,7 @@ const {
   updateUserRole,
   getMyProfile,
   getMyLoanStatus,
+  refreshAccessToken,
 } = require("../controllers/UserController");
 
 /* =========================================================
@@ -129,6 +130,11 @@ router.get(
   "/me/loan-status",
   protect,
   getMyLoanStatus
+);
+
+router.post(
+  "/refresh-token",
+  refreshAccessToken
 );
 
 // ADMIN
