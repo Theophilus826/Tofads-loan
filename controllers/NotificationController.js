@@ -156,7 +156,7 @@ exports.markNotificationAsRead = async (req, res) => {
           readAt: new Date(),
         },
       },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     );
 
     if (!notification) {

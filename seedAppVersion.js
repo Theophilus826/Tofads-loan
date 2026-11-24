@@ -19,7 +19,7 @@ async function seedAppVersion() {
     console.log("Connected to MongoDB");
 
     const version = {
-      version: "1.0.04",
+      version: "1.0.05",
       versionCode: 1,
       changelog: "Initial release",
       apkUrl:
@@ -33,7 +33,7 @@ async function seedAppVersion() {
       { $set: version },
       {
         upsert: true,
-        new: true,
+        returnDocument: "after",
         runValidators: true,
         setDefaultsOnInsert: true,
       }

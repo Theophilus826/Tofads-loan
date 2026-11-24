@@ -130,7 +130,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
         ),
       },
     },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   // Prevent reuse of an already rotated token.

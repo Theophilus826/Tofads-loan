@@ -67,7 +67,7 @@ const heartbeat = async (req, res) => {
         update,
         {
           upsert: true,
-          new: true,
+          returnDocument: "after",
           runValidators: true,
           setDefaultsOnInsert: true,
         },
@@ -93,7 +93,7 @@ const heartbeat = async (req, res) => {
           },
         },
         {
-          new: true,
+          returnDocument: "after",
           runValidators: true,
         },
       );
