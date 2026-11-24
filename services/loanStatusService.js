@@ -40,7 +40,8 @@ const getLoanStatusForUser = async (userId) => {
 
     RepaymentAccountRepository.findByUser(userId),
 
-    // Use the existing repository method.
+    // Prefer a current repayment schedule, but retain the most recent
+    // completed schedule so its final status remains available to the dashboard.
     RepaymentScheduleRepository.findByUser(userId).then((schedules) => {
       const list = Array.isArray(schedules)
         ? schedules
@@ -48,13 +49,19 @@ const getLoanStatusForUser = async (userId) => {
           ? [schedules]
           : [];
 
-      return (
-        list.find((schedule) =>
-          ["active", "partially_paid", "overdue"].includes(
-            String(schedule.status || "").toLowerCase(),
-          ),
-        ) || null
+      const currentSchedule = list.find((schedule) =>
+        ["active", "partially_paid", "overdue"].includes(
+          String(schedule.status || "").toLowerCase(),
+        ),
       );
+
+      const completedSchedule = list.find((schedule) =>
+        ["paid", "completed"].includes(
+          String(schedule.status || "").toLowerCase(),
+        ),
+      );
+
+      return currentSchedule || completedSchedule || null;
     }),
 
     MandateRepository.findActiveByUser(userId),
